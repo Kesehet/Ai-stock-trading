@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.brokers import PaperBroker
 from app.models import Product, Quote, Side, TradeIntent
@@ -6,7 +6,7 @@ from app.risk import PortfolioSnapshot, RiskEngine, RiskLimits
 
 
 def main() -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     intent = TradeIntent(
         symbol="TCS",
         side=Side.BUY,
