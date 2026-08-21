@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 from app.evidence.models import EvidenceItem
 
@@ -45,7 +46,9 @@ class EvidenceStore:
             with self._connect() as connection:
                 connection.execute(
                     """
-                    INSERT INTO evidence(id, fingerprint, symbol, available_at, published_at, payload)
+                    INSERT INTO evidence(
+                        id, fingerprint, symbol, available_at, published_at, payload
+                    )
                     VALUES (?, ?, ?, ?, ?, ?)
                     """,
                     (
@@ -73,7 +76,7 @@ class EvidenceStore:
         if limit <= 0:
             return []
         query = "SELECT payload FROM evidence WHERE available_at <= ?"
-        params: list[str | int] = [cutoff.isoformat()]
+        params: list[object] = [cutoff.isoformat()]
         if symbol is not None:
             query += " AND symbol = ?"
             params.append(symbol)
@@ -81,4 +84,7 @@ class EvidenceStore:
         params.append(limit)
         with self._connect() as connection:
             rows = connection.execute(query, params).fetchall()
-        return [EvidenceItem.model_validate_json(row["payload"]) for row in rows]
+        return [
+            EvidenceItem.model_validate_json(cast(str, row["payload"]))
+            for row in rows
+        ]
