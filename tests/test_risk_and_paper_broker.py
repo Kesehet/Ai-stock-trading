@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.brokers import PaperBroker
 from app.models import Product, Quote, Side, TradeIntent
@@ -6,7 +6,7 @@ from app.risk import PortfolioSnapshot, RiskEngine, RiskLimits
 
 
 def make_intent(**overrides: object) -> TradeIntent:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     data = {
         "symbol": "TCS",
         "side": Side.BUY,
@@ -29,7 +29,7 @@ def make_intent(**overrides: object) -> TradeIntent:
 
 
 def test_risk_caps_ai_requested_allocation_and_paper_executes() -> None:
-    quote = Quote(symbol="TCS", last_price=3100.0, as_of=datetime.now(timezone.utc))
+    quote = Quote(symbol="TCS", last_price=3100.0, as_of=datetime.now(UTC))
     portfolio = PortfolioSnapshot(cash=500_000, equity=500_000, open_positions=0)
     engine = RiskEngine(RiskLimits(max_position_pct=0.05))
 
@@ -37,7 +37,6 @@ def test_risk_caps_ai_requested_allocation_and_paper_executes() -> None:
 
     assert decision.approved is True
     assert decision.order_plan is not None
-    # AI requested 10%, but the deterministic 5% cap gives floor(25,000 / 3,100) = 8.
     assert decision.order_plan.quantity == 8
 
     broker = PaperBroker(starting_cash=500_000)
@@ -50,7 +49,7 @@ def test_risk_caps_ai_requested_allocation_and_paper_executes() -> None:
 
 
 def test_daily_loss_limit_blocks_trade() -> None:
-    quote = Quote(symbol="TCS", last_price=3100.0, as_of=datetime.now(timezone.utc))
+    quote = Quote(symbol="TCS", last_price=3100.0, as_of=datetime.now(UTC))
     portfolio = PortfolioSnapshot(
         cash=500_000,
         equity=500_000,
@@ -66,7 +65,7 @@ def test_daily_loss_limit_blocks_trade() -> None:
 
 
 def test_entry_range_blocks_chasing_price() -> None:
-    quote = Quote(symbol="TCS", last_price=3250.0, as_of=datetime.now(timezone.utc))
+    quote = Quote(symbol="TCS", last_price=3250.0, as_of=datetime.now(UTC))
     portfolio = PortfolioSnapshot(cash=500_000, equity=500_000, open_positions=0)
     engine = RiskEngine(RiskLimits())
 
