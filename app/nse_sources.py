@@ -42,8 +42,18 @@ def parse_nse_equity_csv(content: str) -> InstrumentMaster:
             or row.get("name")
             or symbol
         ).strip()
-        isin = (row.get("ISIN NUMBER") or row.get("ISIN_NUMBER") or row.get("isin") or "").strip().upper()
-        series = (row.get(" SERIES") or row.get("SERIES") or row.get("series") or "").strip().upper()
+        isin = (
+            row.get("ISIN NUMBER")
+            or row.get("ISIN_NUMBER")
+            or row.get("isin")
+            or ""
+        ).strip().upper()
+        series = (
+            row.get(" SERIES")
+            or row.get("SERIES")
+            or row.get("series")
+            or ""
+        ).strip().upper()
         if not symbol or not isin:
             continue
         if series and series != "EQ":
