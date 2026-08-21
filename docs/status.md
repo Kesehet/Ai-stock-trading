@@ -19,26 +19,34 @@ This file is the concise execution view. `tasks.md` remains the full production 
 - [x] First-pass event classification
 - [x] Canonical instrument master using exchange/symbol/ISIN/internal ID
 - [x] Text-to-instrument resolution for evidence ingestion
+- [x] Official NSE equity-security CSV adapter/parser
+- [x] Official-source RSS adapter factory for NSE feeds
+- [x] NSE UDiFF daily bhavcopy downloader/parser
 - [x] Point-in-time historical OHLCV store
 - [x] Buy-and-hold benchmark strategy
 - [x] Momentum strategy
 - [x] Configurable transaction-cost/slippage model
 - [x] Leakage-conscious backtest loop with return, drawdown, and Sharpe output
+- [x] Deterministic evidence materiality scoring
 - [x] GPT research context built only from evidence/candles visible at decision time
 - [x] Prompt-injection boundary: fetched text is treated as untrusted evidence, not instructions
+- [x] Technical, fundamental, news, and portfolio specialist-agent orchestration
+- [x] Bull-vs-bear challenge and research-manager orchestration
+- [x] Fund-manager agent producing `TradeIntent` / `NO_TRADE`
+- [x] First end-to-end historical intent → risk → paper-fill simulation
 
 ## Critical path remaining before autonomous paper trading
 
-1. [ ] Production NSE/BSE instrument-master download and refresh
-2. [ ] Real historical NSE/BSE OHLCV provider and local persistence
+1. [ ] Add durable local caching/persistence and range downloader for NSE bhavcopies
+2. [ ] Add BSE instrument/data adapters where needed for dual-exchange coverage
 3. [ ] Corporate-action-adjusted historical prices
-4. [ ] Production NSE/BSE filings/results/corporate-action adapters
+4. [ ] Wire concrete production NSE filing/result/corporate-action feed URLs/configuration
 5. [ ] RBI/macro and selected legally usable financial-news adapters
 6. [ ] Better entity resolution and ambiguity handling
-7. [ ] Materiality/relevance scoring and evidence clustering
-8. [ ] Fundamental/technical/news/portfolio research agents
-9. [ ] Bull-vs-bear challenge and research manager
-10. [ ] Fund manager producing `TradeIntent` / `NO_TRADE`
+7. [ ] Evidence clustering/syndication dedup beyond exact fingerprints
+8. [ ] Add fundamental-statement normalization and calculated ratios
+9. [ ] Add deterministic technical feature calculations for specialist context
+10. [ ] Add portfolio exposure/correlation context to portfolio specialist
 11. [ ] Stronger backtest execution model: next-bar fills, limit/stop fills, partial fills
 12. [ ] Date-aware Indian transaction-cost schedule
 13. [ ] NIFTY benchmark data and full metrics suite
