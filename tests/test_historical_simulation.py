@@ -28,7 +28,7 @@ class FakeAgent:
             target_allocation_pct=allocation,
             entry_max=200.0,
             stop_price=90.0 if side == Side.BUY else None,
-            target_price=200.0 if side == Side.BUY else None,
+            target_price=220.0 if side == Side.BUY else None,
             confidence=0.8,
             horizon="test",
             evidence_ids=(),
