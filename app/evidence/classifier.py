@@ -1,3 +1,4 @@
+# ruff: noqa: I001
 from __future__ import annotations
 
 from app.evidence.models import EvidenceItem, MarketEvent, MarketEventType
