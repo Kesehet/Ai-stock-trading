@@ -56,7 +56,8 @@ class GPTResearchAgent:
         evidence_lines = [
             (
                 f"[{item.id}] tier={item.source_tier} trust={item.trust_score:.2f} "
-                f"available={item.available_at.isoformat()} title={item.title} body={item.body[:800]}"
+                f"available={item.available_at.isoformat()} title={item.title} "
+                f"body={item.body[:800]}"
             )
             for item in evidence
         ]
