@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from math import floor
 
 from app.models import OrderPlan, Quote, RiskDecision, Side, TradeIntent
@@ -38,8 +38,8 @@ class RiskEngine:
         if intent.side == Side.HOLD:
             return RiskDecision(approved=False, reason="HOLD requires no broker order")
 
-        now = datetime.now(timezone.utc)
-        quote_age = (now - quote.as_of.astimezone(timezone.utc)).total_seconds()
+        now = datetime.now(UTC)
+        quote_age = (now - quote.as_of.astimezone(UTC)).total_seconds()
         if quote_age > self.limits.max_quote_age_seconds:
             return RiskDecision(approved=False, reason="Quote is stale")
 
@@ -61,9 +61,17 @@ class RiskEngine:
         if quantity <= 0:
             return RiskDecision(approved=False, reason="Insufficient capital for one share")
 
-        if intent.side == Side.BUY and intent.entry_max is not None and quote.last_price > intent.entry_max:
+        if (
+            intent.side == Side.BUY
+            and intent.entry_max is not None
+            and quote.last_price > intent.entry_max
+        ):
             return RiskDecision(approved=False, reason="Price exceeds allowed entry range")
-        if intent.side == Side.BUY and intent.entry_min is not None and quote.last_price < intent.entry_min:
+        if (
+            intent.side == Side.BUY
+            and intent.entry_min is not None
+            and quote.last_price < intent.entry_min
+        ):
             return RiskDecision(approved=False, reason="Price is below allowed entry range")
 
         plan = OrderPlan(
@@ -76,4 +84,8 @@ class RiskEngine:
             stop_price=intent.stop_price,
             target_price=intent.target_price,
         )
-        return RiskDecision(approved=True, reason="Approved by deterministic risk rules", order_plan=plan)
+        return RiskDecision(
+            approved=True,
+            reason="Approved by deterministic risk rules",
+            order_plan=plan,
+        )
