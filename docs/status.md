@@ -22,11 +22,15 @@ This file is the concise execution view. `tasks.md` remains the full production 
 - [x] Official NSE equity-security CSV adapter/parser
 - [x] Official-source RSS adapter factory for NSE feeds
 - [x] NSE UDiFF daily bhavcopy downloader/parser
+- [x] Cached NSE date-range history loader
 - [x] Point-in-time historical OHLCV store
+- [x] Generic split/bonus historical price adjustment engine
 - [x] Buy-and-hold benchmark strategy
 - [x] Momentum strategy
 - [x] Configurable transaction-cost/slippage model
-- [x] Leakage-conscious backtest loop with return, drawdown, and Sharpe output
+- [x] Current date-aware NSE cash-equity charge schedule abstraction
+- [x] Leakage-conscious first backtest loop with return, drawdown, and Sharpe output
+- [x] Next-bar execution backtester with Sharpe, Sortino, drawdown, and turnover
 - [x] Deterministic evidence materiality scoring
 - [x] GPT research context built only from evidence/candles visible at decision time
 - [x] Prompt-injection boundary: fetched text is treated as untrusted evidence, not instructions
@@ -37,41 +41,40 @@ This file is the concise execution view. `tasks.md` remains the full production 
 
 ## Critical path remaining before autonomous paper trading
 
-1. [ ] Add durable local caching/persistence and range downloader for NSE bhavcopies
-2. [ ] Add BSE instrument/data adapters where needed for dual-exchange coverage
-3. [ ] Corporate-action-adjusted historical prices
-4. [ ] Wire concrete production NSE filing/result/corporate-action feed URLs/configuration
-5. [ ] RBI/macro and selected legally usable financial-news adapters
-6. [ ] Better entity resolution and ambiguity handling
-7. [ ] Evidence clustering/syndication dedup beyond exact fingerprints
-8. [ ] Add fundamental-statement normalization and calculated ratios
-9. [ ] Add deterministic technical feature calculations for specialist context
-10. [ ] Add portfolio exposure/correlation context to portfolio specialist
-11. [ ] Stronger backtest execution model: next-bar fills, limit/stop fills, partial fills
-12. [ ] Date-aware Indian transaction-cost schedule
-13. [ ] NIFTY benchmark data and full metrics suite
-14. [ ] Walk-forward/out-of-sample validation and overfitting checks
-15. [ ] Persistent portfolio ledger and thesis lifecycle
-16. [ ] Autonomous market-day scheduler
-17. [ ] Realistic paper exchange with latency/slippage/rejections
-18. [ ] Dashboard, evidence/explanation timeline, and kill switches
-19. [ ] Alerts and daily reports
+1. [ ] Add BSE instrument/data adapters where dual-exchange coverage is useful
+2. [ ] Ingest real split/bonus/corporate-action events into the adjustment engine
+3. [ ] Wire concrete production NSE filing/result/corporate-action feed URLs/configuration
+4. [ ] RBI/macro and selected legally usable financial-news adapters
+5. [ ] Better entity resolution and ambiguity handling
+6. [ ] Evidence clustering/syndication dedup beyond exact fingerprints
+7. [ ] Fundamental-statement normalization and calculated ratios
+8. [ ] Deterministic technical feature calculations for specialist context
+9. [ ] Portfolio exposure/correlation context for the portfolio specialist
+10. [ ] Limit/stop/partial-fill simulation beyond next-bar market fills
+11. [ ] Historical charge schedules for older backtest periods
+12. [ ] NIFTY benchmark data and full metrics suite
+13. [ ] Walk-forward/out-of-sample validation and overfitting checks
+14. [ ] Persistent portfolio ledger and thesis lifecycle
+15. [ ] Autonomous market-day scheduler
+16. [ ] Realistic paper exchange with latency/slippage/rejections
+17. [ ] Dashboard, evidence/explanation timeline, and kill switches
+18. [ ] Alerts and daily reports
 
 ## Critical path remaining before live trading
 
-20. [ ] Compare current Zerodha / Upstox / Dhan / FYERS APIs and choose broker
-21. [ ] Implement full broker interface and authentication/session management
-22. [ ] Order update streaming and portfolio/order reconciliation
-23. [ ] Idempotent execution and timeout-after-acceptance recovery
-24. [ ] Static-IP/network requirements where applicable
-25. [ ] Complete deterministic risk limits: sector/correlation/liquidity/drawdown/etc.
-26. [ ] Kill-switch engine and automatic safe mode
-27. [ ] Failure-injection test suite
-28. [ ] Security hardening and secrets separation
-29. [ ] Re-check then-current SEBI/NSE/broker retail-algo requirements
-30. [ ] Extended autonomous paper run
-31. [ ] Tiny-capital delivery/swing live gate
-32. [ ] Only after validation: limited intraday live gate
+19. [ ] Compare current Zerodha / Upstox / Dhan / FYERS APIs and choose broker
+20. [ ] Implement full broker interface and authentication/session management
+21. [ ] Order update streaming and portfolio/order reconciliation
+22. [ ] Idempotent execution and timeout-after-acceptance recovery
+23. [ ] Static-IP/network requirements where applicable
+24. [ ] Complete deterministic risk limits: sector/correlation/liquidity/drawdown/etc.
+25. [ ] Kill-switch engine and automatic safe mode
+26. [ ] Failure-injection test suite
+27. [ ] Security hardening and secrets separation
+28. [ ] Re-check then-current SEBI/NSE/broker retail-algo requirements
+29. [ ] Extended autonomous paper run
+30. [ ] Tiny-capital delivery/swing live gate
+31. [ ] Only after validation: limited intraday live gate
 
 ## Later / non-blocking research
 
