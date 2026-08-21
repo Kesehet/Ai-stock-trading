@@ -34,12 +34,17 @@ class RiskEngine:
         intent: TradeIntent,
         quote: Quote,
         portfolio: PortfolioSnapshot,
+        now: datetime | None = None,
     ) -> RiskDecision:
         if intent.side == Side.HOLD:
             return RiskDecision(approved=False, reason="HOLD requires no broker order")
 
-        now = datetime.now(UTC)
-        quote_age = (now - quote.as_of.astimezone(UTC)).total_seconds()
+        decision_time = now or datetime.now(UTC)
+        if decision_time.tzinfo is None:
+            raise ValueError("risk decision clock must be timezone-aware")
+        quote_age = (decision_time.astimezone(UTC) - quote.as_of.astimezone(UTC)).total_seconds()
+        if quote_age < 0:
+            return RiskDecision(approved=False, reason="Quote is from the future")
         if quote_age > self.limits.max_quote_age_seconds:
             return RiskDecision(approved=False, reason="Quote is stale")
 
