@@ -6,17 +6,27 @@ from app.market_data import Candle, HistoricalDataStore
 from app.materiality import score_evidence
 from app.models import Side
 from app.nse_sources import parse_nse_equity_csv
-from app.research_team import FundDecision, ResearchReport, ResearchRole, ResearchTeam, ResearchContextBuilder
+from app.research_team import (
+    FundDecision,
+    ResearchContextBuilder,
+    ResearchReport,
+    ResearchRole,
+    ResearchTeam,
+)
 
 
 class FakeLLM:
     def generate_structured(self, prompt: str, response_model):
-        del prompt
         if response_model is ResearchReport:
-            role = ResearchRole.TECHNICAL
-            for candidate in ResearchRole:
-                if candidate.value in prompt if False else False:
-                    role = candidate
+            role = next(
+                (
+                    candidate
+                    for candidate in ResearchRole
+                    if f"{candidate.value} analyst" in prompt
+                    or f"{candidate.value} research role" in prompt
+                ),
+                ResearchRole.MANAGER,
+            )
             return ResearchReport(
                 role=role,
                 score=0.4,
@@ -116,3 +126,20 @@ def test_context_builder_blocks_future_market_data_and_evidence(tmp_path) -> Non
     assert "C=110.00" not in snapshot.market_text
     assert "Board meeting" in snapshot.evidence_text
     assert "Future result" not in snapshot.evidence_text
+
+
+def test_research_team_emits_structured_trade_intent(tmp_path) -> None:
+    as_of = datetime(2026, 8, 22, 1, 0, tzinfo=UTC)
+    market = HistoricalDataStore(
+        [Candle("TCS", as_of, 100, 101, 99, 100, 1000)]
+    )
+    evidence = EvidenceStore(tmp_path / "evidence.db")
+    context = ResearchContextBuilder(market, evidence)
+    team = ResearchTeam(FakeLLM(), context)  # type: ignore[arg-type]
+
+    intent = team.trade_intent("TCS", as_of)
+
+    assert intent.side == Side.BUY
+    assert intent.target_allocation_pct == 0.10
+    assert intent.strategy_id == "multi_agent_fund_v1"
+    assert intent.data_cutoff_at == as_of
