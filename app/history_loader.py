@@ -7,7 +7,7 @@ from time import sleep
 
 import httpx
 
-from app.market_data import Candle, HistoricalDataStore
+from app.market_data import HistoricalDataStore
 from app.nse_bhavcopy import NSEBhavcopySource, parse_udiff_zip
 
 
