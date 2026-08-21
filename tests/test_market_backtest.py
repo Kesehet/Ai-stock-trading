@@ -25,15 +25,22 @@ def _candles(count: int = 30, rising: bool = True) -> list[Candle]:
     return values
 
 
-def test_instrument_master_resolves_symbol_name_and_isin() -> None:
-    master = InstrumentMaster.from_csv(
+def _instrument_master() -> InstrumentMaster:
+    return InstrumentMaster.from_csv(
         "exchange,symbol,name,isin,instrument_id,sector\n"
         "NSE,TCS,Tata Consultancy Services Limited,INE467B01029,NSE:INE467B01029,IT\n"
     )
 
+
+def test_instrument_master_resolves_symbol_name_isin_and_text() -> None:
+    master = _instrument_master()
+
     assert master.require("TCS").isin == "INE467B01029"
     assert master.require("INE467B01029").symbol == "TCS"
     assert master.require("Tata Consultancy Services Limited").symbol == "TCS"
+    resolved = master.resolve_text("Tata Consultancy Services Limited announced results")
+    assert resolved is not None
+    assert resolved.symbol == "TCS"
 
 
 def test_historical_store_never_returns_future_candles() -> None:
