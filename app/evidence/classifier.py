@@ -4,17 +4,32 @@ from app.evidence.models import EvidenceItem, MarketEvent, MarketEventType
 
 
 _RULES: tuple[tuple[MarketEventType, tuple[str, ...]], ...] = (
-    (MarketEventType.FINANCIAL_RESULTS, ("financial result", "quarterly result", "earnings")),
+    (
+        MarketEventType.FINANCIAL_RESULTS,
+        ("financial result", "quarterly result", "earnings"),
+    ),
     (MarketEventType.BOARD_MEETING, ("board meeting",)),
-    (MarketEventType.MANAGEMENT_CHANGE, ("appointment", "resignation", "director", "kmp")),
+    (
+        MarketEventType.MANAGEMENT_CHANGE,
+        ("appointment", "resignation", "director", "kmp"),
+    ),
     (MarketEventType.LARGE_ORDER, ("order win", "contract award", "work order")),
     (MarketEventType.ACQUISITION, ("acquisition", "acquire", "merger")),
-    (MarketEventType.REGULATORY_ACTION, ("sebi", "regulatory action", "penalty", "settlement order")),
+    (
+        MarketEventType.REGULATORY_ACTION,
+        ("sebi", "regulatory action", "penalty", "settlement order"),
+    ),
     (MarketEventType.DIVIDEND, ("dividend",)),
     (MarketEventType.BUYBACK, ("buyback", "buy back")),
-    (MarketEventType.FUNDRAISE, ("fund raise", "fundraising", "qualified institutional", "rights issue")),
+    (
+        MarketEventType.FUNDRAISE,
+        ("fund raise", "fundraising", "qualified institutional", "rights issue"),
+    ),
     (MarketEventType.INSIDER_TRADING, ("insider trading",)),
-    (MarketEventType.SHAREHOLDING_CHANGE, ("shareholding pattern", "promoter holding")),
+    (
+        MarketEventType.SHAREHOLDING_CHANGE,
+        ("shareholding pattern", "promoter holding"),
+    ),
 )
 
 
