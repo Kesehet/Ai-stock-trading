@@ -21,7 +21,9 @@ class InstrumentMaster:
     def __init__(self, instruments: list[Instrument]) -> None:
         self._instruments = tuple(instruments)
         self._by_id = {item.instrument_id.upper(): item for item in instruments}
-        self._by_symbol = {(item.exchange.upper(), item.symbol.upper()): item for item in instruments}
+        self._by_symbol = {
+            (item.exchange.upper(), item.symbol.upper()): item for item in instruments
+        }
         self._by_isin = {item.isin.upper(): item for item in instruments if item.isin}
         self._by_name = {self._normalize(item.name): item for item in instruments}
 
