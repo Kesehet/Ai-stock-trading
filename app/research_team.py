@@ -65,7 +65,11 @@ class ResearchContextBuilder:
 
     def build(self, symbol: str, as_of: datetime) -> ResearchSnapshot:
         candles = self.market_data.as_of(symbol, as_of, limit=self.max_candles)
-        evidence = self.evidence.list_as_of(as_of, symbol=symbol, limit=self.max_evidence)
+        evidence = self.evidence.list_as_of(
+            as_of,
+            symbol=symbol,
+            limit=self.max_evidence,
+        )
         market_text = "\n".join(
             (
                 f"{item.timestamp.isoformat()} O={item.open:.2f} H={item.high:.2f} "
@@ -123,7 +127,12 @@ class DebateAgent:
         self.llm = llm
         self.role = role
 
-    def analyze(self, symbol: str, as_of: datetime, reports: list[ResearchReport]) -> ResearchReport:
+    def analyze(
+        self,
+        symbol: str,
+        as_of: datetime,
+        reports: list[ResearchReport],
+    ) -> ResearchReport:
         reports_text = "\n".join(report.model_dump_json() for report in reports)
         prompt = "\n".join(
             [
@@ -145,7 +154,12 @@ class FundManagerAgent:
     def __init__(self, llm: OllamaClient) -> None:
         self.llm = llm
 
-    def decide(self, symbol: str, as_of: datetime, reports: list[ResearchReport]) -> FundDecision:
+    def decide(
+        self,
+        symbol: str,
+        as_of: datetime,
+        reports: list[ResearchReport],
+    ) -> FundDecision:
         reports_text = "\n".join(report.model_dump_json() for report in reports)
         prompt = "\n".join(
             [
@@ -175,7 +189,11 @@ class ResearchTeam:
         self.manager = DebateAgent(llm, ResearchRole.MANAGER)
         self.fund_manager = FundManagerAgent(llm)
 
-    def run(self, symbol: str, as_of: datetime) -> tuple[list[ResearchReport], FundDecision]:
+    def run(
+        self,
+        symbol: str,
+        as_of: datetime,
+    ) -> tuple[list[ResearchReport], FundDecision]:
         snapshot = self.context.build(symbol, as_of)
         reports = [agent.analyze(snapshot) for agent in self.specialists]
         bull = self.bull.analyze(symbol, as_of, reports)
