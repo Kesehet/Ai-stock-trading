@@ -19,6 +19,7 @@ class InstrumentMaster:
     """Canonical exchange instrument registry used before any trade can execute."""
 
     def __init__(self, instruments: list[Instrument]) -> None:
+        self._instruments = tuple(instruments)
         self._by_id = {item.instrument_id.upper(): item for item in instruments}
         self._by_symbol = {(item.exchange.upper(), item.symbol.upper()): item for item in instruments}
         self._by_isin = {item.isin.upper(): item for item in instruments if item.isin}
@@ -27,6 +28,9 @@ class InstrumentMaster:
     @staticmethod
     def _normalize(value: str) -> str:
         return " ".join(value.upper().replace("LIMITED", "").replace("LTD", "").split())
+
+    def all(self) -> tuple[Instrument, ...]:
+        return self._instruments
 
     def get(self, instrument_id: str) -> Instrument | None:
         return self._by_id.get(instrument_id.upper())
@@ -49,6 +53,22 @@ class InstrumentMaster:
         if by_isin is not None:
             return by_isin
         return self._by_name.get(self._normalize(query))
+
+    def resolve_text(self, text: str, exchange: str = "NSE") -> Instrument | None:
+        upper = text.upper()
+        normalized = self._normalize(text)
+        matches: list[Instrument] = []
+        for item in self._instruments:
+            if item.exchange.upper() != exchange.upper():
+                continue
+            symbol_hit = f" {item.symbol.upper()} " in f" {upper} "
+            isin_hit = bool(item.isin and item.isin.upper() in upper)
+            name_hit = self._normalize(item.name) in normalized
+            if symbol_hit or isin_hit or name_hit:
+                matches.append(item)
+        if len(matches) == 1:
+            return matches[0]
+        return None
 
     def require(self, query: str, exchange: str = "NSE") -> Instrument:
         instrument = self.resolve(query, exchange)
