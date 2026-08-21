@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.evidence.models import EvidenceItem, MarketEventType, SourceTier
 from app.evidence.classifier import classify_event
+from app.evidence.models import EvidenceItem, MarketEventType, SourceTier
 
 
 _EVENT_BASE: dict[MarketEventType, float] = {
