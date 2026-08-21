@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Annotated
 
@@ -34,14 +34,18 @@ class TradeIntent(BaseModel):
     confidence: Annotated[float, Field(ge=0, le=1)] = 0.5
     horizon: str = Field(min_length=1, max_length=64)
     evidence_ids: tuple[str, ...] = ()
-    decision_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    decision_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     data_cutoff_at: datetime
 
     @model_validator(mode="after")
-    def validate_geometry(self) -> "TradeIntent":
+    def validate_geometry(self) -> TradeIntent:
         if self.side == Side.HOLD and self.target_allocation_pct != 0:
             raise ValueError("HOLD must have target_allocation_pct=0")
-        if self.entry_min is not None and self.entry_max is not None and self.entry_min > self.entry_max:
+        if (
+            self.entry_min is not None
+            and self.entry_max is not None
+            and self.entry_min > self.entry_max
+        ):
             raise ValueError("entry_min cannot exceed entry_max")
         if self.side == Side.BUY and self.entry_max is not None:
             if self.stop_price is not None and self.stop_price >= self.entry_max:
