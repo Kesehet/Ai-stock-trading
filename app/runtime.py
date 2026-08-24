@@ -8,8 +8,9 @@ from threading import Event
 from time import sleep, time
 
 from app.config import AppMode, Settings
+from app.nse_calendar import nse_capital_market_calendar
 from app.operations import OperationsStore
-from app.scheduler import IST, MarketCalendar, MarketPhase
+from app.scheduler import IST, MarketPhase
 from app.zerodha_session import ZerodhaSessionStore
 
 logger = logging.getLogger("ai-stock-trading.runtime")
@@ -50,7 +51,7 @@ def main() -> None:
     data_dir.mkdir(parents=True, exist_ok=True)
     operations = OperationsStore(data_dir / "operations.sqlite3")
     session_store = ZerodhaSessionStore(data_dir / "zerodha-session.json")
-    calendar = MarketCalendar()
+    calendar = nse_capital_market_calendar()
     previous_phase: MarketPhase | None = None
 
     signal.signal(signal.SIGTERM, _handle_signal)
