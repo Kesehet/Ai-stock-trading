@@ -1,6 +1,8 @@
 from enum import StrEnum
+from pathlib import Path
+from tempfile import gettempdir
 
-from pydantic import Field, model_validator
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -11,6 +13,10 @@ class AppMode(StrEnum):
 
 
 LIVE_CONFIRMATION_PHRASE = "I_UNDERSTAND_THIS_CAN_PLACE_REAL_ORDERS"
+
+
+def _heartbeat_path() -> str:
+    return str(Path(gettempdir()) / "ai-stock-trading-heartbeat")
 
 
 class Settings(BaseSettings):
@@ -32,11 +38,11 @@ class Settings(BaseSettings):
     live_trading_confirmation: str = ""
 
     zerodha_api_key: str = ""
-    zerodha_api_secret: str = ""
-    zerodha_access_token: str = ""
+    zerodha_api_secret: SecretStr = SecretStr("")
+    zerodha_access_token: SecretStr = SecretStr("")
 
     data_dir: str = "/var/lib/ai-stock-trading"
-    heartbeat_path: str = "/tmp/ai-stock-trading-heartbeat"
+    heartbeat_path: str = Field(default_factory=_heartbeat_path)
     runtime_poll_seconds: float = Field(default=10.0, ge=1.0, le=300.0)
 
     @model_validator(mode="after")
@@ -47,6 +53,6 @@ class Settings(BaseSettings):
             raise ValueError("LIVE mode requires LIVE_TRADING_ARMED=true")
         if self.live_trading_confirmation != LIVE_CONFIRMATION_PHRASE:
             raise ValueError("LIVE mode requires the exact confirmation phrase")
-        if not self.zerodha_api_key or not self.zerodha_api_secret:
+        if not self.zerodha_api_key or not self.zerodha_api_secret.get_secret_value():
             raise ValueError("LIVE mode requires Zerodha API credentials")
         return self
