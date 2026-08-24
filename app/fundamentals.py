@@ -20,22 +20,34 @@ class FundamentalSnapshot:
 
     def ratios(self) -> dict[str, float | None]:
         revenue_growth = None
-        if self.revenue is not None and self.prior_revenue not in {None, 0}:
+        if (
+            self.revenue is not None
+            and self.prior_revenue is not None
+            and self.prior_revenue != 0
+        ):
             revenue_growth = (self.revenue / self.prior_revenue) - 1
         profit_growth = None
-        if self.net_income is not None and self.prior_net_income not in {None, 0}:
+        if (
+            self.net_income is not None
+            and self.prior_net_income is not None
+            and self.prior_net_income != 0
+        ):
             profit_growth = (self.net_income / self.prior_net_income) - 1
         net_margin = None
-        if self.net_income is not None and self.revenue not in {None, 0}:
+        if self.net_income is not None and self.revenue is not None and self.revenue != 0:
             net_margin = self.net_income / self.revenue
         roe = None
-        if self.net_income is not None and self.equity not in {None, 0}:
+        if self.net_income is not None and self.equity is not None and self.equity != 0:
             roe = self.net_income / self.equity
         debt_to_equity = None
-        if self.debt is not None and self.equity not in {None, 0}:
+        if self.debt is not None and self.equity is not None and self.equity != 0:
             debt_to_equity = self.debt / self.equity
         price_to_earnings = None
-        if self.market_cap is not None and self.net_income not in {None, 0}:
+        if (
+            self.market_cap is not None
+            and self.net_income is not None
+            and self.net_income != 0
+        ):
             price_to_earnings = self.market_cap / self.net_income
         return {
             "revenue_growth": revenue_growth,
