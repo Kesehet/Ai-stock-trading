@@ -44,3 +44,14 @@ def test_live_mode_can_only_arm_with_all_required_controls() -> None:
         _env_file=None,
     )
     assert settings.app_mode == AppMode.LIVE
+
+
+def test_broker_secrets_are_masked_in_settings_repr() -> None:
+    settings = Settings(
+        zerodha_api_secret="super-secret-value",
+        zerodha_access_token="session-secret-value",
+        _env_file=None,
+    )
+    rendered = repr(settings)
+    assert "super-secret-value" not in rendered
+    assert "session-secret-value" not in rendered
