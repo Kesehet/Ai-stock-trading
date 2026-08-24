@@ -27,6 +27,12 @@ This file is the concise execution view. `tasks.md` remains the full production 
 - [x] Deterministic India market-phase scheduler
 - [x] Verified 2026 NSE Capital Market holiday calendar with fail-closed unknown-year behavior
 - [x] Runtime audit events for market-phase transitions
+- [x] Simple read-only financial dashboard home page
+- [x] Dashboard shows paper/real mode, starting capital, deployed capital, current value and P&L
+- [x] Dashboard portfolio-value trend and open-position allocation graphics
+- [x] Dashboard valuation history store with explicit cost-basis fallback when no market mark exists
+- [x] Dashboard isolated as a separate low-resource container and published only to host localhost by default
+- [x] AI reasoning/planning intentionally excluded from the dashboard; detailed internals remain in logs
 - [x] Typed `TradeIntent`, `OrderPlan`, quotes, positions, and risk decisions
 - [x] Ollama structured-output client for GPT-OSS
 - [x] Deterministic position sizing and risk gate
@@ -84,7 +90,7 @@ This file is the concise execution view. `tasks.md` remains the full production 
 13. [ ] Load/refresh NSE holiday calendars automatically for future years
 14. [ ] Run scheduled premarket/open/closing/postmarket jobs, not only phase detection
 15. [ ] Realistic paper exchange with latency/slippage/rejections
-16. [ ] Dashboard and evidence/explanation timeline
+16. [ ] Feed regular marked portfolio snapshots into the dashboard from market data
 17. [ ] Alerts and daily reports
 
 ## Critical path remaining before live trading
@@ -115,4 +121,5 @@ This file is the concise execution view. `tasks.md` remains the full production 
 ## Current deployment verdict
 
 - **Paper/backtest Docker deployment:** APPROVED on the current branch. CI, Security and Docker workflows are green.
+- **Dashboard:** APPROVED on the current branch. It is read-only, low-resource and localhost-only by default.
 - **Real-money live execution:** intentionally blocked. There is still no broker order-placement route, and live mode fails closed when its safety/session prerequisites are not satisfied.
