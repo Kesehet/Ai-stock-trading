@@ -1,6 +1,6 @@
 from enum import StrEnum
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -10,8 +10,15 @@ class AppMode(StrEnum):
     LIVE = "live"
 
 
+LIVE_CONFIRMATION_PHRASE = "I_UNDERSTAND_THIS_CAN_PLACE_REAL_ORDERS"
+
+
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     app_mode: AppMode = AppMode.PAPER
     ollama_base_url: str = "http://localhost:11434"
@@ -20,3 +27,26 @@ class Settings(BaseSettings):
     max_position_pct: float = Field(default=0.05, gt=0, le=1)
     max_daily_loss_pct: float = Field(default=0.01, gt=0, le=1)
     max_open_positions: int = Field(default=10, gt=0)
+
+    live_trading_armed: bool = False
+    live_trading_confirmation: str = ""
+
+    zerodha_api_key: str = ""
+    zerodha_api_secret: str = ""
+    zerodha_access_token: str = ""
+
+    data_dir: str = "/var/lib/ai-stock-trading"
+    heartbeat_path: str = "/tmp/ai-stock-trading-heartbeat"
+    runtime_poll_seconds: float = Field(default=10.0, ge=1.0, le=300.0)
+
+    @model_validator(mode="after")
+    def validate_live_mode(self) -> "Settings":
+        if self.app_mode != AppMode.LIVE:
+            return self
+        if not self.live_trading_armed:
+            raise ValueError("LIVE mode requires LIVE_TRADING_ARMED=true")
+        if self.live_trading_confirmation != LIVE_CONFIRMATION_PHRASE:
+            raise ValueError("LIVE mode requires the exact confirmation phrase")
+        if not self.zerodha_api_key or not self.zerodha_api_secret:
+            raise ValueError("LIVE mode requires Zerodha API credentials")
+        return self
