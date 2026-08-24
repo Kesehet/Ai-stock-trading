@@ -5,11 +5,14 @@ services:
       dockerfile: Dockerfile
     image: ai-stock-trading:local
     restart: unless-stopped
+    init: true
     env_file:
       - .env
     environment:
       APP_MODE: ${APP_MODE:-paper}
       LIVE_TRADING_ARMED: ${LIVE_TRADING_ARMED:-false}
+    extra_hosts:
+      - host.docker.internal:host-gateway
     volumes:
       - trader-data:/var/lib/ai-stock-trading
     read_only: true
@@ -22,6 +25,12 @@ services:
     pids_limit: 256
     mem_limit: 2g
     cpus: 2.0
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
     healthcheck:
       test: ["CMD", "python", "-m", "app.healthcheck"]
       interval: 30s
