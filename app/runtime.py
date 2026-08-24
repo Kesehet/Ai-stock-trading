@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import logging
 import signal
+from datetime import datetime
 from pathlib import Path
 from threading import Event
 from time import sleep, time
 
 from app.config import AppMode, Settings
 from app.operations import OperationsStore
+from app.scheduler import IST, MarketCalendar, MarketPhase
 from app.zerodha_session import ZerodhaSessionStore
 
 logger = logging.getLogger("ai-stock-trading.runtime")
@@ -48,6 +50,8 @@ def main() -> None:
     data_dir.mkdir(parents=True, exist_ok=True)
     operations = OperationsStore(data_dir / "operations.sqlite3")
     session_store = ZerodhaSessionStore(data_dir / "zerodha-session.json")
+    calendar = MarketCalendar()
+    previous_phase: MarketPhase | None = None
 
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
@@ -64,6 +68,16 @@ def main() -> None:
     while not _stop.is_set():
         if settings.app_mode == AppMode.LIVE:
             _enforce_live_session_safety(session_store, operations)
+        now = datetime.now(IST)
+        phase = calendar.phase_at(now)
+        if phase != previous_phase:
+            operations.append_event(
+                "market",
+                "PHASE_CHANGED",
+                {"phase": phase.value, "as_of": now.isoformat()},
+            )
+            logger.info("market phase: %s", phase.value)
+            previous_phase = phase
         _write_heartbeat(heartbeat)
         sleep(settings.runtime_poll_seconds)
 
