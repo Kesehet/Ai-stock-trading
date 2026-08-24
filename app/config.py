@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     data_dir: str = "/var/lib/ai-stock-trading"
     heartbeat_path: str = Field(default_factory=_heartbeat_path)
     runtime_poll_seconds: float = Field(default=10.0, ge=1.0, le=300.0)
+    dashboard_bind_host: str = "127.0.0.1"
     dashboard_port: int = Field(default=8080, ge=1024, le=65535)
 
     @model_validator(mode="after")
