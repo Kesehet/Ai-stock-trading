@@ -5,8 +5,7 @@ from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from html import unescape
 from html.parser import HTMLParser
-from typing import Protocol
-from xml.etree.ElementTree import Element
+from typing import Any, Protocol
 
 import httpx
 from defusedxml import ElementTree
@@ -45,7 +44,7 @@ def _strip_html(value: str) -> str:
     return parser.text()
 
 
-def _child_text(node: Element, *names: str) -> str:
+def _child_text(node: Any, *names: str) -> str:
     for child in node:
         local_name = child.tag.rsplit("}", 1)[-1]
         if local_name in names and child.text:
