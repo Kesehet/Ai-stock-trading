@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 import pytest
 
 from app.benchmarks import compare_to_benchmark, parse_nse_historical_index_csv
@@ -11,19 +13,14 @@ def test_parse_nse_historical_index_csv() -> None:
     )
 
     series = parse_nse_historical_index_csv(content)
-    points = series.between(
-        "NIFTY 50",
-        series.as_of("NIFTY 50", __import__("datetime").datetime.max.replace(
-            tzinfo=__import__("datetime").UTC
-        )).timestamp,
-        __import__("datetime").datetime.max.replace(tzinfo=__import__("datetime").UTC),
-    )
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    end = datetime(2026, 1, 2, tzinfo=UTC)
+    points = series.between("NIFTY 50", start, end)
+    latest = series.as_of("NIFTY 50", end)
 
-    assert len(points) == 1
-    assert series.as_of(
-        "NIFTY 50",
-        __import__("datetime").datetime.max.replace(tzinfo=__import__("datetime").UTC),
-    ).close == 26150
+    assert len(points) == 2
+    assert latest is not None
+    assert latest.close == 26150
 
 
 def test_compare_to_benchmark_calculates_excess_return() -> None:
