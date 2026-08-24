@@ -47,6 +47,7 @@ services:
       - .env
     environment:
       APP_MODE: ${APP_MODE:-paper}
+      DASHBOARD_BIND_HOST: 0.0.0.0
       DASHBOARD_PORT: 8080
     depends_on:
       trader:
