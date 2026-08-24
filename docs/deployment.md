@@ -20,6 +20,31 @@ docker compose logs --tail=200 trader
 
 The worker exposes no public port. Runtime state is stored in the `trader-data` volume.
 
+## Emergency safety controls
+
+These controls work before the dashboard exists and persist across container restarts.
+
+Check safe-mode state:
+
+```bash
+docker compose run --rm trader python -m app.safety_cli status
+```
+
+Immediately trip safe mode:
+
+```bash
+docker compose run --rm trader python -m app.safety_cli trip --reason MANUAL_EMERGENCY_STOP
+```
+
+Safe mode is deliberately harder to clear. Clear it only after the underlying cause has been investigated:
+
+```bash
+docker compose run --rm trader python -m app.safety_cli clear \
+  --confirmation I_HAVE_RESOLVED_THE_SAFETY_CAUSE
+```
+
+Future broker order paths must check this persistent safe-mode state before every new order. Clearing a Zerodha authentication problem cannot clear a different risk/safety trip.
+
 ## Explicit live override
 
 Do **not** use this until the live-readiness checklist in `docs/security-audit.md` is complete and the broker adapter has been reviewed.
@@ -70,6 +95,7 @@ The `trader-data` volume contains the operational SQLite audit/safety ledger and
 - `no-new-privileges`
 - no host ports
 - CPU/memory/PID limits
+- bounded Docker JSON logs
 - persistent state isolated to a named volume
 - tmpfs runtime temp directory
 - liveness heartbeat healthcheck
