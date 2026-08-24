@@ -21,6 +21,12 @@ This file is the concise execution view. `tasks.md` remains the full production 
 - [x] Zerodha login URL/request-token exchange implementation
 - [x] Zerodha session expiry model (6 AM next day), restricted session storage and status CLI
 - [x] Live runtime automatically trips persistent safe mode for missing/expired Zerodha session
+- [x] Transactional persistent paper broker with restart-safe cash/positions/orders
+- [x] Paper-order idempotency using `intent_id`
+- [x] Persistent thesis lifecycle with evidence, cutoff, horizon and close/invalidation reason
+- [x] Deterministic India market-phase scheduler
+- [x] Verified 2026 NSE Capital Market holiday calendar with fail-closed unknown-year behavior
+- [x] Runtime audit events for market-phase transitions
 - [x] Typed `TradeIntent`, `OrderPlan`, quotes, positions, and risk decisions
 - [x] Ollama structured-output client for GPT-OSS
 - [x] Deterministic position sizing and risk gate
@@ -41,6 +47,8 @@ This file is the concise execution view. `tasks.md` remains the full production 
 - [x] Generic split/bonus historical price adjustment engine
 - [x] Buy-and-hold benchmark strategy
 - [x] Momentum strategy
+- [x] NSE historical-index CSV parser and point-in-time benchmark store
+- [x] Benchmark excess return, tracking error and information-ratio metrics
 - [x] Configurable transaction-cost/slippage model
 - [x] Current date-aware NSE cash-equity charge schedule abstraction
 - [x] Leakage-conscious first backtest loop with return, drawdown, and Sharpe output
@@ -70,28 +78,29 @@ This file is the concise execution view. `tasks.md` remains the full production 
 7. [ ] Production fundamental-statement adapters feeding normalized snapshots
 8. [ ] Limit/stop/partial-fill simulation beyond next-bar market fills
 9. [ ] Historical charge schedules for older backtest periods
-10. [ ] NIFTY benchmark data and full metrics suite
+10. [ ] Automated official NIFTY/TRI source feeding the benchmark store
 11. [ ] Walk-forward/out-of-sample validation and overfitting checks
-12. [ ] Persistent portfolio/thesis ledger
-13. [ ] Autonomous market-day scheduler
-14. [ ] Realistic paper exchange with latency/slippage/rejections
-15. [ ] Dashboard and evidence/explanation timeline
-16. [ ] Alerts and daily reports
+12. [ ] Wire persistent paper broker + thesis store into the autonomous lifecycle
+13. [ ] Load/refresh NSE holiday calendars automatically for future years
+14. [ ] Run scheduled premarket/open/closing/postmarket jobs, not only phase detection
+15. [ ] Realistic paper exchange with latency/slippage/rejections
+16. [ ] Dashboard and evidence/explanation timeline
+17. [ ] Alerts and daily reports
 
 ## Critical path remaining before live trading
 
-17. [ ] Implement Zerodha broker order/portfolio interface (authentication lifecycle foundation exists)
-18. [ ] Order update streaming and portfolio/order reconciliation
-19. [ ] Idempotent execution and timeout-after-acceptance recovery
-20. [ ] Confirm and implement static-IP/network requirements where applicable
-21. [ ] Complete deterministic risk limits: sector/correlation/liquidity/drawdown/etc.
-22. [ ] Wire safe-mode state into every future order path and add close/cancel kill actions
-23. [ ] Failure-injection test suite
-24. [ ] Persistent transaction-safe order/portfolio ledger and tested backups
-25. [ ] Re-check then-current SEBI/NSE/Zerodha retail-algo requirements
-26. [ ] Extended autonomous paper run
-27. [ ] Tiny-capital delivery/swing live gate
-28. [ ] Only after validation: limited intraday live gate
+18. [ ] Implement Zerodha broker order/portfolio interface (authentication lifecycle foundation exists)
+19. [ ] Order update streaming and portfolio/order reconciliation
+20. [ ] Idempotent execution and timeout-after-acceptance recovery
+21. [ ] Confirm and implement static-IP/network requirements where applicable
+22. [ ] Complete deterministic risk limits: sector/correlation/liquidity/drawdown/etc.
+23. [ ] Wire safe-mode state into every future order path and add close/cancel kill actions
+24. [ ] Failure-injection test suite
+25. [ ] Persistent transaction-safe live order/portfolio ledger and tested backups
+26. [ ] Re-check then-current SEBI/NSE/Zerodha retail-algo requirements
+27. [ ] Extended autonomous paper run
+28. [ ] Tiny-capital delivery/swing live gate
+29. [ ] Only after validation: limited intraday live gate
 
 ## Later / non-blocking research
 
