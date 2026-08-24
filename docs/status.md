@@ -5,8 +5,14 @@ This file is the concise execution view. `tasks.md` remains the full production 
 ## Completed / substantially implemented
 
 - [x] Python project scaffold and dependency management
-- [x] Dockerfile and environment template
+- [x] Hardened non-root Docker image and environment template
+- [x] Safe-default `compose.yaml` plus explicit `compose.live.yaml` override
 - [x] Ruff, strict mypy, pytest, and GitHub Actions CI
+- [x] Scheduled/PR dependency and Python security scans (`pip-audit` + Bandit)
+- [x] Explicit live-mode arming gate and confirmation phrase
+- [x] Container heartbeat/liveness healthcheck and graceful shutdown
+- [x] Secrets/data/log exclusions in `.gitignore` and `.dockerignore`
+- [x] Production security audit and Docker deployment runbook
 - [x] Typed `TradeIntent`, `OrderPlan`, quotes, positions, and risk decisions
 - [x] Ollama structured-output client for GPT-OSS
 - [x] Deterministic position sizing and risk gate
@@ -43,6 +49,7 @@ This file is the concise execution view. `tasks.md` remains the full production 
 - [x] Bull-vs-bear challenge and research-manager orchestration
 - [x] Fund-manager agent producing `TradeIntent` / `NO_TRADE`
 - [x] First end-to-end historical intent → risk → paper-fill simulation
+- [x] Live broker selected: Zerodha Kite Connect (adapter still pending)
 
 ## Critical path remaining before autonomous paper trading
 
@@ -65,16 +72,16 @@ This file is the concise execution view. `tasks.md` remains the full production 
 
 ## Critical path remaining before live trading
 
-17. [ ] Compare current Zerodha / Upstox / Dhan / FYERS APIs and choose broker
-18. [ ] Implement full broker interface and authentication/session management
+17. [ ] Implement Zerodha broker interface and authentication/session management
+18. [ ] Daily Kite access-token lifecycle with expiry safe mode
 19. [ ] Order update streaming and portfolio/order reconciliation
 20. [ ] Idempotent execution and timeout-after-acceptance recovery
 21. [ ] Static-IP/network requirements where applicable
 22. [ ] Complete deterministic risk limits: sector/correlation/liquidity/drawdown/etc.
 23. [ ] Kill-switch engine and automatic safe mode
 24. [ ] Failure-injection test suite
-25. [ ] Security hardening and secrets separation
-26. [ ] Re-check then-current SEBI/NSE/broker retail-algo requirements
+25. [ ] Persistent transaction-safe order/portfolio/audit ledger and backups
+26. [ ] Re-check then-current SEBI/NSE/Zerodha retail-algo requirements
 27. [ ] Extended autonomous paper run
 28. [ ] Tiny-capital delivery/swing live gate
 29. [ ] Only after validation: limited intraday live gate
@@ -89,16 +96,7 @@ This file is the concise execution view. `tasks.md` remains the full production 
 - [ ] PostgreSQL migration when SQLite becomes insufficient
 - [ ] F&O (explicitly not V1)
 
-## Current milestone definition
+## Current deployment verdict
 
-The next milestone is complete when the system can be given a historical timestamp and capital amount, then autonomously:
-
-1. resolve the tradable universe,
-2. load only market/evidence data available at that time,
-3. run research agents,
-4. emit `TradeIntent` or `NO_TRADE`,
-5. apply deterministic risk,
-6. simulate realistic fills and Indian costs,
-7. update the portfolio,
-8. repeat through time, and
-9. produce benchmarked performance and an auditable explanation for every decision.
+- **Paper/backtest Docker deployment:** allowed once CI and Security workflows pass.
+- **Real-money live execution:** intentionally blocked until the live-trading checklist above is complete.
