@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from math import sqrt
 from statistics import mean
 
@@ -61,7 +62,7 @@ def build_portfolio_context(
     positions: list[Position],
     cash: float,
     market_data: HistoricalDataStore,
-    as_of,
+    as_of: datetime,
     lookback: int = 60,
 ) -> PortfolioContext:
     values: dict[str, float] = {}
