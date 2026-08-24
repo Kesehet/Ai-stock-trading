@@ -46,9 +46,9 @@ def _strip_html(value: str) -> str:
 
 def _child_text(node: Any, *names: str) -> str:
     for child in node:
-        local_name = child.tag.rsplit("}", 1)[-1]
+        local_name = str(child.tag).rsplit("}", 1)[-1]
         if local_name in names and child.text:
-            return child.text.strip()
+            return str(child.text).strip()
     return ""
 
 
@@ -71,7 +71,7 @@ def parse_rss(xml: str, config: RSSSourceConfig, retrieved_at: datetime) -> list
     root = ElementTree.fromstring(xml)
     items: list[EvidenceItem] = []
     for node in root.iter():
-        if node.tag.rsplit("}", 1)[-1] not in {"item", "entry"}:
+        if str(node.tag).rsplit("}", 1)[-1] not in {"item", "entry"}:
             continue
         title = _child_text(node, "title")
         if not title:
@@ -79,8 +79,8 @@ def parse_rss(xml: str, config: RSSSourceConfig, retrieved_at: datetime) -> list
         link = _child_text(node, "link")
         if not link:
             for child in node:
-                if child.tag.rsplit("}", 1)[-1] == "link" and child.attrib.get("href"):
-                    link = child.attrib["href"]
+                if str(child.tag).rsplit("}", 1)[-1] == "link" and child.attrib.get("href"):
+                    link = str(child.attrib["href"])
                     break
         source_ref = _child_text(node, "guid", "id") or None
         body = _strip_html(_child_text(node, "description", "summary", "content"))
