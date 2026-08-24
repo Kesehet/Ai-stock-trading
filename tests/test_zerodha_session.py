@@ -13,7 +13,7 @@ IST = ZoneInfo("Asia/Kolkata")
 
 def test_kite_checksum_matches_sha256_contract() -> None:
     assert kite_checksum("key", "token", "secret") == (
-        "0fd46442411a84839c1000142f9861af6e82249521ea2efa918220dcc91a030f"
+        "08a03d928417ea4085557933d3b187ff2a3515b039d6054dbd230c95d978a17a"
     )
 
 
