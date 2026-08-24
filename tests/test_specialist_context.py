@@ -1,5 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from app.brokers import PaperBroker
 from app.evidence.store import EvidenceStore
 from app.fundamentals import FundamentalSnapshot, FundamentalStore
@@ -63,7 +65,7 @@ def test_fundamental_store_blocks_future_snapshot() -> None:
 
     assert visible is not None
     assert visible.revenue == 120
-    assert visible.ratios()["revenue_growth"] == 0.2
+    assert visible.ratios()["revenue_growth"] == pytest.approx(0.2)
 
 
 def test_context_builder_gives_each_role_specific_context(tmp_path) -> None:
