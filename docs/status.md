@@ -7,19 +7,27 @@ This file is the concise execution view. `tasks.md` remains the full production 
 - [x] Python project scaffold and dependency management
 - [x] Hardened non-root Docker image and environment template
 - [x] Safe-default `compose.yaml` plus explicit `compose.live.yaml` override
+- [x] Compose Linux host-gateway support, bounded logs, resources and graceful shutdown
 - [x] Ruff, strict mypy, pytest, and GitHub Actions CI
+- [x] Docker image + paper/live Compose validation in GitHub Actions
 - [x] Scheduled/PR dependency and Python security scans (`pip-audit` + Bandit)
 - [x] Explicit live-mode arming gate and confirmation phrase
+- [x] Broker secrets/access tokens masked by Pydantic secret types
 - [x] Container heartbeat/liveness healthcheck and graceful shutdown
 - [x] Secrets/data/log exclusions in `.gitignore` and `.dockerignore`
 - [x] Production security audit and Docker deployment runbook
+- [x] Persistent SQLite operational audit log and safe-mode state
+- [x] Emergency safe-mode CLI with explicit clear confirmation
+- [x] Zerodha login URL/request-token exchange implementation
+- [x] Zerodha session expiry model (6 AM next day), restricted session storage and status CLI
+- [x] Live runtime automatically trips persistent safe mode for missing/expired Zerodha session
 - [x] Typed `TradeIntent`, `OrderPlan`, quotes, positions, and risk decisions
 - [x] Ollama structured-output client for GPT-OSS
 - [x] Deterministic position sizing and risk gate
 - [x] Maximum position cap, daily loss guard, stale quote rejection, open-position cap
 - [x] Paper broker contract and in-memory execution
 - [x] Evidence models with source tier/trust/provenance
-- [x] RSS/Atom ingestion abstraction
+- [x] RSS/Atom ingestion abstraction using hardened `defusedxml` parsing
 - [x] Evidence deduplication and SQLite evidence store
 - [x] Point-in-time evidence queries using `available_at`
 - [x] First-pass event classification
@@ -49,7 +57,7 @@ This file is the concise execution view. `tasks.md` remains the full production 
 - [x] Bull-vs-bear challenge and research-manager orchestration
 - [x] Fund-manager agent producing `TradeIntent` / `NO_TRADE`
 - [x] First end-to-end historical intent → risk → paper-fill simulation
-- [x] Live broker selected: Zerodha Kite Connect (adapter still pending)
+- [x] Live broker selected: Zerodha Kite Connect
 
 ## Critical path remaining before autonomous paper trading
 
@@ -64,27 +72,26 @@ This file is the concise execution view. `tasks.md` remains the full production 
 9. [ ] Historical charge schedules for older backtest periods
 10. [ ] NIFTY benchmark data and full metrics suite
 11. [ ] Walk-forward/out-of-sample validation and overfitting checks
-12. [ ] Persistent portfolio ledger and thesis lifecycle
+12. [ ] Persistent portfolio/thesis ledger
 13. [ ] Autonomous market-day scheduler
 14. [ ] Realistic paper exchange with latency/slippage/rejections
-15. [ ] Dashboard, evidence/explanation timeline, and kill switches
+15. [ ] Dashboard and evidence/explanation timeline
 16. [ ] Alerts and daily reports
 
 ## Critical path remaining before live trading
 
-17. [ ] Implement Zerodha broker interface and authentication/session management
-18. [ ] Daily Kite access-token lifecycle with expiry safe mode
-19. [ ] Order update streaming and portfolio/order reconciliation
-20. [ ] Idempotent execution and timeout-after-acceptance recovery
-21. [ ] Static-IP/network requirements where applicable
-22. [ ] Complete deterministic risk limits: sector/correlation/liquidity/drawdown/etc.
-23. [ ] Kill-switch engine and automatic safe mode
-24. [ ] Failure-injection test suite
-25. [ ] Persistent transaction-safe order/portfolio/audit ledger and backups
-26. [ ] Re-check then-current SEBI/NSE/Zerodha retail-algo requirements
-27. [ ] Extended autonomous paper run
-28. [ ] Tiny-capital delivery/swing live gate
-29. [ ] Only after validation: limited intraday live gate
+17. [ ] Implement Zerodha broker order/portfolio interface (authentication lifecycle foundation exists)
+18. [ ] Order update streaming and portfolio/order reconciliation
+19. [ ] Idempotent execution and timeout-after-acceptance recovery
+20. [ ] Confirm and implement static-IP/network requirements where applicable
+21. [ ] Complete deterministic risk limits: sector/correlation/liquidity/drawdown/etc.
+22. [ ] Wire safe-mode state into every future order path and add close/cancel kill actions
+23. [ ] Failure-injection test suite
+24. [ ] Persistent transaction-safe order/portfolio ledger and tested backups
+25. [ ] Re-check then-current SEBI/NSE/Zerodha retail-algo requirements
+26. [ ] Extended autonomous paper run
+27. [ ] Tiny-capital delivery/swing live gate
+28. [ ] Only after validation: limited intraday live gate
 
 ## Later / non-blocking research
 
@@ -98,5 +105,5 @@ This file is the concise execution view. `tasks.md` remains the full production 
 
 ## Current deployment verdict
 
-- **Paper/backtest Docker deployment:** allowed once CI and Security workflows pass.
-- **Real-money live execution:** intentionally blocked until the live-trading checklist above is complete.
+- **Paper/backtest Docker deployment:** APPROVED on the current branch. CI, Security and Docker workflows are green.
+- **Real-money live execution:** intentionally blocked. There is still no broker order-placement route, and live mode fails closed when its safety/session prerequisites are not satisfied.
