@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 from __future__ import annotations
 
 import html
@@ -206,7 +207,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; "
+            "base-uri 'none'; frame-ancestors 'none'",
+        )
         self.send_header("Content-Length", str(len(content)))
         self.end_headers()
         self.wfile.write(content)
@@ -218,7 +223,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
 def main() -> None:
     settings = Settings()
     DashboardHandler.settings = settings
-    server = ThreadingHTTPServer(("0.0.0.0", settings.dashboard_port), DashboardHandler)
+    server = ThreadingHTTPServer(
+        (settings.dashboard_bind_host, settings.dashboard_port),
+        DashboardHandler,
+    )
     server.serve_forever()
 
 
