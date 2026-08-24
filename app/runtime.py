@@ -35,7 +35,9 @@ def main() -> None:
 
     logger.info("runtime starting in %s mode", settings.app_mode.value)
     if settings.app_mode == AppMode.LIVE:
-        logger.warning("LIVE mode is armed; broker execution adapter is still disabled in this build")
+        logger.warning(
+            "LIVE mode is armed; broker execution adapter is still disabled in this build"
+        )
 
     while not _stop.is_set():
         _write_heartbeat(heartbeat)
