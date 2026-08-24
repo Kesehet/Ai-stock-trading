@@ -34,9 +34,33 @@ Live startup additionally requires server-side environment secrets including the
 
 ## Zerodha session lifecycle
 
-`ZERODHA_API_KEY` and `ZERODHA_API_SECRET` are long-lived application credentials and belong in the server secret store. The Kite `access_token` is a session credential and expires at 6 AM the next day; it must be renewed through the normal login/token-exchange flow.
+`ZERODHA_API_KEY` and `ZERODHA_API_SECRET` are long-lived application credentials and belong in the server secret store. Kite access tokens expire at 6 AM the next day and must be renewed through the normal login/token-exchange flow.
 
-The final production system should enter safe mode and block new orders when the broker session expires or reconciliation cannot be completed.
+The worker now fails closed: if live mode is armed and the locally stored Zerodha session is missing or expired, persistent safe mode is enabled automatically. Restarting the container does not clear that state.
+
+Generate the normal Kite login URL without exposing the API secret:
+
+```bash
+docker compose run --rm trader python -m app.zerodha_cli login-url
+```
+
+After logging in to Zerodha, exchange the returned `request_token`. The CLI prompts interactively so the request token is not placed in the shell command/history:
+
+```bash
+docker compose run --rm trader python -m app.zerodha_cli exchange
+```
+
+Check session and safe-mode status:
+
+```bash
+docker compose run --rm trader python -m app.zerodha_cli status
+```
+
+A successful session refresh automatically clears safe mode **only** when its reason is `ZERODHA_SESSION_MISSING_OR_EXPIRED`. Other safety trips are never cleared by broker authentication.
+
+## Persistent operations state
+
+The `trader-data` volume contains the operational SQLite audit/safety ledger and the permission-restricted Zerodha session file. The audit store uses WAL mode and full synchronous durability. Raw broker secrets/access tokens must never be written to the audit payload.
 
 ## Container security defaults
 
@@ -47,10 +71,10 @@ The final production system should enter safe mode and block new orders when the
 - no host ports
 - CPU/memory/PID limits
 - persistent state isolated to a named volume
-- tmpfs `/tmp`
+- tmpfs runtime temp directory
 - liveness heartbeat healthcheck
 - `.env`, secrets, DBs, logs and local data excluded from Docker build context
 
 ## Backups
 
-Before real-money activation, migrate the order/portfolio/audit ledger to durable transactional storage and configure tested backups. Do not rely on an ephemeral container filesystem.
+Before real-money activation, extend the durable ledger to orders/positions/reconciliation state and configure tested backups. Do not rely on an ephemeral container filesystem.
