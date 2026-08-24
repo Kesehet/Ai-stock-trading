@@ -65,13 +65,41 @@ class ResearchSnapshot:
 
     def context_for(self, role: ResearchRole) -> str:
         if role == ResearchRole.TECHNICAL:
-            return "\n".join(["TECHNICAL FEATURES:", self.technical_text, "RAW MARKET:", self.market_text])
+            return "\n".join(
+                [
+                    "TECHNICAL FEATURES:",
+                    self.technical_text,
+                    "RAW MARKET:",
+                    self.market_text,
+                ]
+            )
         if role == ResearchRole.FUNDAMENTAL:
-            return "\n".join(["FUNDAMENTALS:", self.fundamental_text, "EVIDENCE:", self.evidence_text])
+            return "\n".join(
+                [
+                    "FUNDAMENTALS:",
+                    self.fundamental_text,
+                    "EVIDENCE:",
+                    self.evidence_text,
+                ]
+            )
         if role == ResearchRole.NEWS:
-            return "\n".join(["MACRO REGIME:", self.macro_text, "EVIDENCE:", self.evidence_text])
+            return "\n".join(
+                [
+                    "MACRO REGIME:",
+                    self.macro_text,
+                    "EVIDENCE:",
+                    self.evidence_text,
+                ]
+            )
         if role == ResearchRole.PORTFOLIO:
-            return "\n".join(["PORTFOLIO:", self.portfolio_text, "MACRO REGIME:", self.macro_text])
+            return "\n".join(
+                [
+                    "PORTFOLIO:",
+                    self.portfolio_text,
+                    "MACRO REGIME:",
+                    self.macro_text,
+                ]
+            )
         return "\n".join([self.market_text, self.evidence_text])
 
 
