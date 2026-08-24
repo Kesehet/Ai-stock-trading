@@ -35,6 +35,11 @@ This file is the concise execution view. `tasks.md` remains the full production 
 - [x] GPT research context built only from evidence/candles visible at decision time
 - [x] Prompt-injection boundary: fetched text is treated as untrusted evidence, not instructions
 - [x] Technical, fundamental, news, and portfolio specialist-agent orchestration
+- [x] Deterministic technical features: SMA/EMA/RSI/returns/volatility/volume/high-distance
+- [x] Point-in-time fundamental snapshots with growth, margin, ROE, D/E and P/E calculations
+- [x] Point-in-time macro-regime snapshot store
+- [x] Portfolio exposure, cash weight, position weight and pair-correlation context
+- [x] Role-specific specialist prompts instead of one shared generic context
 - [x] Bull-vs-bear challenge and research-manager orchestration
 - [x] Fund-manager agent producing `TradeIntent` / `NO_TRADE`
 - [x] First end-to-end historical intent → risk → paper-fill simulation
@@ -47,34 +52,32 @@ This file is the concise execution view. `tasks.md` remains the full production 
 4. [ ] RBI/macro and selected legally usable financial-news adapters
 5. [ ] Better entity resolution and ambiguity handling
 6. [ ] Evidence clustering/syndication dedup beyond exact fingerprints
-7. [ ] Fundamental-statement normalization and calculated ratios
-8. [ ] Deterministic technical feature calculations for specialist context
-9. [ ] Portfolio exposure/correlation context for the portfolio specialist
-10. [ ] Limit/stop/partial-fill simulation beyond next-bar market fills
-11. [ ] Historical charge schedules for older backtest periods
-12. [ ] NIFTY benchmark data and full metrics suite
-13. [ ] Walk-forward/out-of-sample validation and overfitting checks
-14. [ ] Persistent portfolio ledger and thesis lifecycle
-15. [ ] Autonomous market-day scheduler
-16. [ ] Realistic paper exchange with latency/slippage/rejections
-17. [ ] Dashboard, evidence/explanation timeline, and kill switches
-18. [ ] Alerts and daily reports
+7. [ ] Production fundamental-statement adapters feeding normalized snapshots
+8. [ ] Limit/stop/partial-fill simulation beyond next-bar market fills
+9. [ ] Historical charge schedules for older backtest periods
+10. [ ] NIFTY benchmark data and full metrics suite
+11. [ ] Walk-forward/out-of-sample validation and overfitting checks
+12. [ ] Persistent portfolio ledger and thesis lifecycle
+13. [ ] Autonomous market-day scheduler
+14. [ ] Realistic paper exchange with latency/slippage/rejections
+15. [ ] Dashboard, evidence/explanation timeline, and kill switches
+16. [ ] Alerts and daily reports
 
 ## Critical path remaining before live trading
 
-19. [ ] Compare current Zerodha / Upstox / Dhan / FYERS APIs and choose broker
-20. [ ] Implement full broker interface and authentication/session management
-21. [ ] Order update streaming and portfolio/order reconciliation
-22. [ ] Idempotent execution and timeout-after-acceptance recovery
-23. [ ] Static-IP/network requirements where applicable
-24. [ ] Complete deterministic risk limits: sector/correlation/liquidity/drawdown/etc.
-25. [ ] Kill-switch engine and automatic safe mode
-26. [ ] Failure-injection test suite
-27. [ ] Security hardening and secrets separation
-28. [ ] Re-check then-current SEBI/NSE/broker retail-algo requirements
-29. [ ] Extended autonomous paper run
-30. [ ] Tiny-capital delivery/swing live gate
-31. [ ] Only after validation: limited intraday live gate
+17. [ ] Compare current Zerodha / Upstox / Dhan / FYERS APIs and choose broker
+18. [ ] Implement full broker interface and authentication/session management
+19. [ ] Order update streaming and portfolio/order reconciliation
+20. [ ] Idempotent execution and timeout-after-acceptance recovery
+21. [ ] Static-IP/network requirements where applicable
+22. [ ] Complete deterministic risk limits: sector/correlation/liquidity/drawdown/etc.
+23. [ ] Kill-switch engine and automatic safe mode
+24. [ ] Failure-injection test suite
+25. [ ] Security hardening and secrets separation
+26. [ ] Re-check then-current SEBI/NSE/broker retail-algo requirements
+27. [ ] Extended autonomous paper run
+28. [ ] Tiny-capital delivery/swing live gate
+29. [ ] Only after validation: limited intraday live gate
 
 ## Later / non-blocking research
 
