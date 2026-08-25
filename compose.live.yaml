@@ -1,0 +1,9 @@
+services:
+  trader:
+    environment:
+      APP_MODE: live
+      LIVE_TRADING_ARMED: ${LIVE_TRADING_ARMED:?set LIVE_TRADING_ARMED=true explicitly}
+      LIVE_TRADING_CONFIRMATION: ${LIVE_TRADING_CONFIRMATION:?set the required confirmation phrase}
+      ZERODHA_API_KEY: ${ZERODHA_API_KEY:?set Zerodha API key as a secret}
+      ZERODHA_API_SECRET: ${ZERODHA_API_SECRET:?set Zerodha API secret as a secret}
+      ZERODHA_ACCESS_TOKEN: ${ZERODHA_ACCESS_TOKEN:-}

@@ -1,0 +1,59 @@
+name: Deploy Hostinger VPS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-hostinger-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Validate Hostinger compose
+        env:
+          APP_MODE: paper
+          DASHBOARD_HOST_PORT: "18080"
+        run: docker compose -f compose.hostinger.yaml config
+
+      - name: Deploy isolated Hostinger Docker project
+        uses: hostinger/deploy-on-vps@b0868cec74bfa63af6bfa7bdb0dfee2f9bef13ea # v2
+        with:
+          api-key: ${{ secrets.HOSTINGER_API_KEY }}
+          virtual-machine: "1058562"
+          project-name: ai-stock-trading
+          docker-compose-path: compose.hostinger.yaml
+          environment-variables: |
+            APP_MODE=paper
+            OLLAMA_BASE_URL=http://host.docker.internal:11434
+            OLLAMA_MODEL=gpt-oss:120b
+            STARTING_CASH=500000
+            MAX_POSITION_PCT=0.05
+            MAX_DAILY_LOSS_PCT=0.01
+            MAX_OPEN_POSITIONS=10
+            RUNTIME_POLL_SECONDS=10
+            DASHBOARD_HOST_PORT=18080
+            LIVE_TRADING_ARMED=false
+            LIVE_TRADING_CONFIRMATION=
+
+      - name: Verify project exists and containers are running
+        env:
+          HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY }}
+        run: |
+          set -euo pipefail
+          RESPONSE=$(curl --fail --silent --show-error \
+            -H "Authorization: Bearer $HOSTINGER_API_KEY" \
+            "https://developers.hostinger.com/api/vps/v1/virtual-machines/1058562/docker/ai-stock-trading/containers")
+          echo "$RESPONSE" | jq -e 'length >= 2' >/dev/null
+          echo "$RESPONSE" | jq -e 'all(.[]; .state == "running")' >/dev/null
+          echo "Hostinger project ai-stock-trading is running."

@@ -1,0 +1,33 @@
+name: Docker
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare non-secret test environment
+        run: cp .env.example .env
+      - name: Validate paper Compose manifest
+        run: docker compose -f compose.yaml config
+      - name: Validate live Compose overlay
+        env:
+          LIVE_TRADING_ARMED: "true"
+          LIVE_TRADING_CONFIRMATION: I_UNDERSTAND_THIS_CAN_PLACE_REAL_ORDERS
+          ZERODHA_API_KEY: ci-placeholder-key
+          ZERODHA_API_SECRET: ci-placeholder-secret
+        run: docker compose -f compose.yaml -f compose.live.yaml config
+      - name: Validate Hostinger Compose manifest
+        env:
+          APP_MODE: paper
+          DASHBOARD_HOST_PORT: "18080"
+        run: docker compose -f compose.hostinger.yaml config
+      - name: Build production image
+        run: docker build --pull -t ai-stock-trading:ci .

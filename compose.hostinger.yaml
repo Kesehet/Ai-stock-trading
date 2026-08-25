@@ -1,0 +1,96 @@
+services:
+  trader:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ai-stock-trading:local
+    restart: unless-stopped
+    init: true
+    environment:
+      APP_MODE: ${APP_MODE:-paper}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gpt-oss:120b}
+      STARTING_CASH: ${STARTING_CASH:-500000}
+      MAX_POSITION_PCT: ${MAX_POSITION_PCT:-0.05}
+      MAX_DAILY_LOSS_PCT: ${MAX_DAILY_LOSS_PCT:-0.01}
+      MAX_OPEN_POSITIONS: ${MAX_OPEN_POSITIONS:-10}
+      DATA_DIR: /var/lib/ai-stock-trading
+      RUNTIME_POLL_SECONDS: ${RUNTIME_POLL_SECONDS:-10}
+      LIVE_TRADING_ARMED: ${LIVE_TRADING_ARMED:-false}
+      LIVE_TRADING_CONFIRMATION: ${LIVE_TRADING_CONFIRMATION:-}
+      ZERODHA_API_KEY: ${ZERODHA_API_KEY:-}
+      ZERODHA_API_SECRET: ${ZERODHA_API_SECRET:-}
+      ZERODHA_ACCESS_TOKEN: ${ZERODHA_ACCESS_TOKEN:-}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - trader-data:/var/lib/ai-stock-trading
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 2g
+    cpus: 2.0
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  dashboard:
+    image: ai-stock-trading:local
+    restart: unless-stopped
+    init: true
+    command: ["python", "-m", "app.dashboard"]
+    environment:
+      APP_MODE: ${APP_MODE:-paper}
+      STARTING_CASH: ${STARTING_CASH:-500000}
+      DATA_DIR: /var/lib/ai-stock-trading
+      DASHBOARD_BIND_HOST: 0.0.0.0
+      DASHBOARD_PORT: 8080
+      LIVE_TRADING_ARMED: ${LIVE_TRADING_ARMED:-false}
+      LIVE_TRADING_CONFIRMATION: ${LIVE_TRADING_CONFIRMATION:-}
+      ZERODHA_API_KEY: ${ZERODHA_API_KEY:-}
+      ZERODHA_API_SECRET: ${ZERODHA_API_SECRET:-}
+    depends_on:
+      trader:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${DASHBOARD_HOST_PORT:-18080}:8080"
+    volumes:
+      - trader-data:/var/lib/ai-stock-trading
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 0.5
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  trader-data:

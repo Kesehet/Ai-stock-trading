@@ -1,0 +1,82 @@
+services:
+  trader:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ai-stock-trading:local
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    environment:
+      APP_MODE: ${APP_MODE:-paper}
+      LIVE_TRADING_ARMED: ${LIVE_TRADING_ARMED:-false}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - trader-data:/var/lib/ai-stock-trading
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 2g
+    cpus: 2.0
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  dashboard:
+    image: ai-stock-trading:local
+    restart: unless-stopped
+    init: true
+    command: ["python", "-m", "app.dashboard"]
+    env_file:
+      - .env
+    environment:
+      APP_MODE: ${APP_MODE:-paper}
+      DASHBOARD_BIND_HOST: 0.0.0.0
+      DASHBOARD_PORT: 8080
+    depends_on:
+      trader:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${DASHBOARD_PORT:-8080}:8080"
+    volumes:
+      - trader-data:/var/lib/ai-stock-trading
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 0.5
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  trader-data:
