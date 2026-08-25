@@ -12,132 +12,48 @@ concurrency:
   group: deploy-hostinger-production
   cancel-in-progress: false
 
-env:
-  COMPOSE_PROJECT_NAME: ai-stock-trading
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: production
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
-      - name: Validate required secrets
+      - name: Validate Hostinger compose
         env:
-          VPS_HOST: ${{ secrets.HOSTINGER_VPS_HOST }}
-          VPS_USER: ${{ secrets.HOSTINGER_VPS_USER }}
-          VPS_SSH_KEY: ${{ secrets.HOSTINGER_VPS_SSH_KEY }}
-          VPS_KNOWN_HOSTS: ${{ secrets.HOSTINGER_VPS_KNOWN_HOSTS }}
-          APP_ENV_B64: ${{ secrets.HOSTINGER_APP_ENV_B64 }}
-        run: |
-          set -euo pipefail
-          for name in VPS_HOST VPS_USER VPS_SSH_KEY VPS_KNOWN_HOSTS APP_ENV_B64; do
-            if [ -z "${!name}" ]; then
-              echo "Missing required deployment secret: ${name}" >&2
-              exit 1
-            fi
-          done
+          APP_MODE: paper
+          DASHBOARD_HOST_PORT: "18080"
+        run: docker compose -f compose.hostinger.yaml config
 
-      - name: Configure SSH
+      - name: Deploy isolated Hostinger Docker project
+        uses: hostinger/deploy-on-vps@v2
+        with:
+          api-key: ${{ secrets.HOSTINGER_API_KEY }}
+          virtual-machine: "1058562"
+          project-name: ai-stock-trading
+          docker-compose-path: compose.hostinger.yaml
+          environment-variables: |
+            APP_MODE=paper
+            OLLAMA_BASE_URL=http://host.docker.internal:11434
+            OLLAMA_MODEL=gpt-oss:120b
+            STARTING_CASH=500000
+            MAX_POSITION_PCT=0.05
+            MAX_DAILY_LOSS_PCT=0.01
+            MAX_OPEN_POSITIONS=10
+            RUNTIME_POLL_SECONDS=10
+            DASHBOARD_HOST_PORT=18080
+            LIVE_TRADING_ARMED=false
+            LIVE_TRADING_CONFIRMATION=
+
+      - name: Verify project exists and containers are running
         env:
-          VPS_SSH_KEY: ${{ secrets.HOSTINGER_VPS_SSH_KEY }}
-          VPS_KNOWN_HOSTS: ${{ secrets.HOSTINGER_VPS_KNOWN_HOSTS }}
+          HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY }}
         run: |
           set -euo pipefail
-          install -d -m 700 ~/.ssh
-          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/known_hosts
-
-      - name: Package application
-        run: |
-          set -euo pipefail
-          tar \
-            --exclude=.git \
-            --exclude=.env \
-            --exclude='*.sqlite3' \
-            --exclude='*.db' \
-            --exclude=data \
-            -czf /tmp/ai-stock-trading.tar.gz .
-
-      - name: Upload application and environment
-        env:
-          VPS_HOST: ${{ secrets.HOSTINGER_VPS_HOST }}
-          VPS_USER: ${{ secrets.HOSTINGER_VPS_USER }}
-          VPS_PORT: ${{ secrets.HOSTINGER_VPS_PORT }}
-          APP_ENV_B64: ${{ secrets.HOSTINGER_APP_ENV_B64 }}
-        run: |
-          set -euo pipefail
-          PORT="${VPS_PORT:-22}"
-          printf '%s' "$APP_ENV_B64" > /tmp/ai-stock-trading.env.b64
-          scp -P "$PORT" /tmp/ai-stock-trading.tar.gz \
-            "$VPS_USER@$VPS_HOST:/tmp/ai-stock-trading.tar.gz"
-          scp -P "$PORT" /tmp/ai-stock-trading.env.b64 \
-            "$VPS_USER@$VPS_HOST:/tmp/ai-stock-trading.env.b64"
-
-      - name: Deploy isolated Docker application
-        env:
-          VPS_HOST: ${{ secrets.HOSTINGER_VPS_HOST }}
-          VPS_USER: ${{ secrets.HOSTINGER_VPS_USER }}
-          VPS_PORT: ${{ secrets.HOSTINGER_VPS_PORT }}
-          DEPLOY_PATH: ${{ vars.HOSTINGER_DEPLOY_PATH }}
-        run: |
-          set -euo pipefail
-          PORT="${VPS_PORT:-22}"
-          ssh -p "$PORT" "$VPS_USER@$VPS_HOST" \
-            bash -s -- "${DEPLOY_PATH:-}" "$COMPOSE_PROJECT_NAME" <<'REMOTE'
-          set -euo pipefail
-          REQUESTED_PATH="$1"
-          PROJECT_NAME="$2"
-          SAFE_ROOT="$HOME/apps"
-          APP_DIR="${REQUESTED_PATH:-$SAFE_ROOT/ai-stock-trading}"
-
-          case "$APP_DIR" in
-            "$SAFE_ROOT"/*) ;;
-            *)
-              echo "Refusing unsafe deploy path: $APP_DIR" >&2
-              echo "Deployment path must be inside $SAFE_ROOT/" >&2
-              exit 1
-              ;;
-          esac
-
-          if [ "$APP_DIR" = "/" ] || [ "$APP_DIR" = "$HOME" ] || [ "$APP_DIR" = "$SAFE_ROOT" ]; then
-            echo "Refusing unsafe deploy path: $APP_DIR" >&2
-            exit 1
-          fi
-
-          command -v docker >/dev/null
-          docker compose version >/dev/null
-
-          mkdir -p "$APP_DIR"
-          find "$APP_DIR" -mindepth 1 -maxdepth 1 \
-            ! -name '.env' \
-            ! -name 'backups' \
-            -exec rm -rf -- {} +
-          tar -xzf /tmp/ai-stock-trading.tar.gz -C "$APP_DIR"
-
-          umask 077
-          base64 --decode /tmp/ai-stock-trading.env.b64 > "$APP_DIR/.env"
-          chmod 600 "$APP_DIR/.env"
-          rm -f /tmp/ai-stock-trading.tar.gz /tmp/ai-stock-trading.env.b64
-
-          cd "$APP_DIR"
-          docker compose -p "$PROJECT_NAME" config >/dev/null
-          docker compose -p "$PROJECT_NAME" up -d --build --remove-orphans
-          docker compose -p "$PROJECT_NAME" ps
-          REMOTE
-
-      - name: Verify dashboard health over SSH
-        env:
-          VPS_HOST: ${{ secrets.HOSTINGER_VPS_HOST }}
-          VPS_USER: ${{ secrets.HOSTINGER_VPS_USER }}
-          VPS_PORT: ${{ secrets.HOSTINGER_VPS_PORT }}
-          DASHBOARD_PORT: ${{ vars.HOSTINGER_DASHBOARD_PORT }}
-        run: |
-          set -euo pipefail
-          PORT="${VPS_PORT:-22}"
-          WEB_PORT="${DASHBOARD_PORT:-8080}"
-          ssh -p "$PORT" "$VPS_USER@$VPS_HOST" \
-            "curl --fail --silent --show-error --max-time 10 http://127.0.0.1:${WEB_PORT}/healthz"
+          RESPONSE=$(curl --fail --silent --show-error \
+            -H "Authorization: Bearer $HOSTINGER_API_KEY" \
+            "https://developers.hostinger.com/api/vps/v1/virtual-machines/1058562/docker/ai-stock-trading/containers")
+          echo "$RESPONSE" | jq -e 'length >= 2' >/dev/null
+          echo "$RESPONSE" | jq -e 'all(.[]; .state == "running")' >/dev/null
+          echo "Hostinger project ai-stock-trading is running."
