@@ -24,5 +24,10 @@ jobs:
           ZERODHA_API_KEY: ci-placeholder-key
           ZERODHA_API_SECRET: ci-placeholder-secret
         run: docker compose -f compose.yaml -f compose.live.yaml config
+      - name: Validate Hostinger Compose manifest
+        env:
+          APP_MODE: paper
+          DASHBOARD_HOST_PORT: "18080"
+        run: docker compose -f compose.hostinger.yaml config
       - name: Build production image
         run: docker build --pull -t ai-stock-trading:ci .
