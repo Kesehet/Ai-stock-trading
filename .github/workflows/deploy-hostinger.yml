@@ -91,7 +91,22 @@ jobs:
           set -euo pipefail
           REQUESTED_PATH="$1"
           PROJECT_NAME="$2"
-          APP_DIR="${REQUESTED_PATH:-$HOME/apps/ai-stock-trading}"
+          SAFE_ROOT="$HOME/apps"
+          APP_DIR="${REQUESTED_PATH:-$SAFE_ROOT/ai-stock-trading}"
+
+          case "$APP_DIR" in
+            "$SAFE_ROOT"/*) ;;
+            *)
+              echo "Refusing unsafe deploy path: $APP_DIR" >&2
+              echo "Deployment path must be inside $SAFE_ROOT/" >&2
+              exit 1
+              ;;
+          esac
+
+          if [ "$APP_DIR" = "/" ] || [ "$APP_DIR" = "$HOME" ] || [ "$APP_DIR" = "$SAFE_ROOT" ]; then
+            echo "Refusing unsafe deploy path: $APP_DIR" >&2
+            exit 1
+          fi
 
           command -v docker >/dev/null
           docker compose version >/dev/null
