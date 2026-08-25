@@ -46,14 +46,39 @@ jobs:
             LIVE_TRADING_ARMED=false
             LIVE_TRADING_CONFIRMATION=
 
-      - name: Verify project exists and containers are running
+      - name: Wait for Hostinger containers to become healthy
         env:
           HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY }}
         run: |
           set -euo pipefail
-          RESPONSE=$(curl --fail --silent --show-error \
+          URL="https://developers.hostinger.com/api/vps/v1/virtual-machines/1058562/docker/ai-stock-trading/containers"
+
+          for attempt in $(seq 1 30); do
+            RESPONSE=$(curl --fail --silent --show-error \
+              -H "Authorization: Bearer $HOSTINGER_API_KEY" \
+              "$URL")
+
+            COUNT=$(echo "$RESPONSE" | jq 'length')
+            SUMMARY=$(echo "$RESPONSE" | jq -r '[.[] | "\(.name): state=\(.state), health=\(.health // "n/a"), status=\(.status)"] | join(" | ")')
+            echo "Attempt $attempt/30: containers=$COUNT ${SUMMARY:+| $SUMMARY}"
+
+            FAILED=$(echo "$RESPONSE" | jq '[.[] | select(.state == "exited" or .state == "dead" or .health == "unhealthy")] | length')
+            if [ "$FAILED" -gt 0 ]; then
+              echo "A Hostinger container entered a failed/unhealthy state." >&2
+              echo "$RESPONSE" | jq .
+              exit 1
+            fi
+
+            if echo "$RESPONSE" | jq -e 'length >= 2 and all(.[]; .state == "running" and (.health == null or .health == "" or .health == "healthy" or .health == "starting"))' >/dev/null; then
+              echo "Hostinger project ai-stock-trading is running."
+              exit 0
+            fi
+
+            sleep 10
+          done
+
+          echo "Timed out waiting for Hostinger project ai-stock-trading." >&2
+          curl --silent --show-error \
             -H "Authorization: Bearer $HOSTINGER_API_KEY" \
-            "https://developers.hostinger.com/api/vps/v1/virtual-machines/1058562/docker/ai-stock-trading/containers")
-          echo "$RESPONSE" | jq -e 'length >= 2' >/dev/null
-          echo "$RESPONSE" | jq -e 'all(.[]; .state == "running")' >/dev/null
-          echo "Hostinger project ai-stock-trading is running."
+            "https://developers.hostinger.com/api/vps/v1/virtual-machines/1058562/docker/ai-stock-trading/logs" || true
+          exit 1
