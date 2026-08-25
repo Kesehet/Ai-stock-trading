@@ -27,7 +27,7 @@ jobs:
         run: docker compose -f compose.hostinger.yaml config
 
       - name: Deploy isolated Hostinger Docker project
-        uses: hostinger/deploy-on-vps@v2
+        uses: hostinger/deploy-on-vps@b0868cec74bfa63af6bfa7bdb0dfee2f9bef13ea # v2
         with:
           api-key: ${{ secrets.HOSTINGER_API_KEY }}
           virtual-machine: "1058562"
