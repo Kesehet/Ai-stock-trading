@@ -67,7 +67,7 @@ services:
       trader:
         condition: service_healthy
     ports:
-      - "127.0.0.1:${DASHBOARD_HOST_PORT:-18080}:8080"
+      - "${DASHBOARD_HOST_PORT:-18080}:8080"
     volumes:
       - trader-data:/var/lib/ai-stock-trading
     read_only: true
