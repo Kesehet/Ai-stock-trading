@@ -5,18 +5,30 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from app.brokers import ExecutionResult
+from app.costs import EquityChargeSchedule
 from app.models import OrderPlan, Position, Product, Side
 
 
 class PersistentPaperBroker:
-    """Transaction-safe paper broker with idempotent order execution."""
+    """Transaction-safe paper broker with idempotent, cost-aware execution."""
 
-    def __init__(self, path: str | Path, starting_cash: float) -> None:
+    def __init__(
+        self,
+        path: str | Path,
+        starting_cash: float,
+        *,
+        slippage_bps: float = 0.0,
+        charge_schedule: EquityChargeSchedule | None = None,
+    ) -> None:
         if starting_cash <= 0:
             raise ValueError("starting_cash must be positive")
+        if slippage_bps < 0:
+            raise ValueError("slippage_bps cannot be negative")
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.starting_cash = starting_cash
+        self.slippage_bps = slippage_bps
+        self.charge_schedule = charge_schedule
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
@@ -46,6 +58,7 @@ class PersistentPaperBroker:
             "reference_average_price": (
                 "ALTER TABLE paper_orders ADD COLUMN reference_average_price REAL"
             ),
+            "charges": "ALTER TABLE paper_orders ADD COLUMN charges REAL NOT NULL DEFAULT 0",
         }
         for column, statement in migrations.items():
             if column not in columns:
@@ -80,7 +93,8 @@ class PersistentPaperBroker:
                     filled_quantity INTEGER NOT NULL,
                     executed_at TEXT NOT NULL DEFAULT '',
                     realized_pnl REAL NOT NULL DEFAULT 0,
-                    reference_average_price REAL
+                    reference_average_price REAL,
+                    charges REAL NOT NULL DEFAULT 0
                 );
                 """
             )
@@ -130,13 +144,31 @@ class PersistentPaperBroker:
             average_price=float(row["price"]),
         )
 
+    def _execution_price(self, plan: OrderPlan) -> float:
+        if plan.limit_price is None:
+            raise ValueError("PersistentPaperBroker requires a limit price")
+        slip = self.slippage_bps / 10_000
+        if plan.side == Side.BUY:
+            return round(plan.limit_price * (1 + slip), 2)
+        return round(plan.limit_price * (1 - slip), 2)
+
+    def _charges(self, plan: OrderPlan, turnover: float) -> float:
+        if self.charge_schedule is None:
+            return 0.0
+        return self.charge_schedule.charges(
+            turnover=turnover,
+            side=plan.side,
+            product=plan.product,
+            include_dp=plan.product == Product.DELIVERY and plan.side == Side.SELL,
+        )
+
     def place_order(self, plan: OrderPlan) -> ExecutionResult:
         if plan.limit_price is None:
             raise ValueError("PersistentPaperBroker requires a limit price")
         if plan.side == Side.HOLD:
             raise ValueError("HOLD is not executable")
 
-        price = plan.limit_price
+        price = self._execution_price(plan)
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             existing_order = connection.execute(
@@ -163,16 +195,18 @@ class PersistentPaperBroker:
             current_qty = int(position["quantity"]) if position is not None else 0
             current_avg = float(position["average_price"]) if position is not None else price
             notional = price * plan.quantity
+            charges = self._charges(plan, notional)
             realized_pnl = 0.0
 
             if plan.side == Side.BUY:
-                if notional > cash:
+                total_cost = notional + charges
+                if total_cost > cash:
                     raise ValueError("Insufficient paper cash")
                 new_qty = current_qty + plan.quantity
-                new_avg = ((current_qty * current_avg) + notional) / new_qty
+                new_avg = ((current_qty * current_avg) + total_cost) / new_qty
                 connection.execute(
                     "UPDATE account SET cash = ? WHERE singleton_id = 1",
-                    (cash - notional,),
+                    (cash - total_cost,),
                 )
                 connection.execute(
                     """
@@ -188,10 +222,11 @@ class PersistentPaperBroker:
                 if position is None or current_qty < plan.quantity:
                     raise ValueError("Cannot sell more than the paper position")
                 new_qty = current_qty - plan.quantity
-                realized_pnl = (price - current_avg) * plan.quantity
+                net_proceeds = notional - charges
+                realized_pnl = net_proceeds - (current_avg * plan.quantity)
                 connection.execute(
                     "UPDATE account SET cash = ? WHERE singleton_id = 1",
-                    (cash + notional,),
+                    (cash + net_proceeds,),
                 )
                 if new_qty == 0:
                     connection.execute(
@@ -211,8 +246,9 @@ class PersistentPaperBroker:
                 """
                 INSERT INTO paper_orders(
                     intent_id, symbol, side, product, quantity, price, status,
-                    filled_quantity, executed_at, realized_pnl, reference_average_price
-                ) VALUES (?, ?, ?, ?, ?, ?, 'FILLED', ?, ?, ?, ?)
+                    filled_quantity, executed_at, realized_pnl,
+                    reference_average_price, charges
+                ) VALUES (?, ?, ?, ?, ?, ?, 'FILLED', ?, ?, ?, ?, ?)
                 """,
                 (
                     plan.intent_id,
@@ -225,6 +261,7 @@ class PersistentPaperBroker:
                     datetime.now(UTC).isoformat(),
                     realized_pnl,
                     current_avg,
+                    charges,
                 ),
             )
             order_id = cursor.lastrowid

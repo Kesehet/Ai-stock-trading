@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from math import floor
 
-from app.models import OrderPlan, Quote, RiskDecision, Side, TradeIntent
+from app.models import OrderPlan, Position, Quote, RiskDecision, Side, TradeIntent
 
 
 @dataclass(frozen=True)
@@ -13,6 +13,7 @@ class PortfolioSnapshot:
     equity: float
     open_positions: int
     daily_pnl: float = 0.0
+    positions: tuple[Position, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -21,6 +22,7 @@ class RiskLimits:
     max_daily_loss_pct: float = 0.01
     max_open_positions: int = 10
     max_quote_age_seconds: int = 15
+    min_buy_confidence: float = 0.60
 
 
 class RiskEngine:
@@ -47,25 +49,63 @@ class RiskEngine:
             return RiskDecision(approved=False, reason="Quote is from the future")
         if quote_age > self.limits.max_quote_age_seconds:
             return RiskDecision(approved=False, reason="Quote is stale")
-
         if quote.symbol != intent.symbol:
             return RiskDecision(approved=False, reason="Quote symbol does not match intent")
 
         daily_loss_limit = portfolio.equity * self.limits.max_daily_loss_pct
-        if portfolio.daily_pnl <= -daily_loss_limit:
+        if intent.side == Side.BUY and portfolio.daily_pnl <= -daily_loss_limit:
             return RiskDecision(approved=False, reason="Daily loss limit reached")
+        if intent.side == Side.BUY and intent.confidence < self.limits.min_buy_confidence:
+            return RiskDecision(approved=False, reason="AI confidence is below buy threshold")
 
-        if portfolio.open_positions >= self.limits.max_open_positions and intent.side == Side.BUY:
+        matching_positions = [
+            position
+            for position in portfolio.positions
+            if position.symbol == intent.symbol and position.product == intent.product
+        ]
+        held_quantity = sum(position.quantity for position in matching_positions)
+        current_value = held_quantity * quote.last_price
+
+        if (
+            portfolio.open_positions >= self.limits.max_open_positions
+            and intent.side == Side.BUY
+            and held_quantity == 0
+        ):
             return RiskDecision(approved=False, reason="Maximum open positions reached")
 
-        requested_notional = portfolio.equity * intent.target_allocation_pct
-        max_notional = portfolio.equity * self.limits.max_position_pct
-        notional = min(requested_notional, max_notional, portfolio.cash)
-        quantity = floor(notional / quote.last_price)
+        if intent.side == Side.SELL:
+            if held_quantity <= 0:
+                return RiskDecision(approved=False, reason="No matching position available to sell")
+            desired_remaining = min(
+                current_value,
+                portfolio.equity * intent.target_allocation_pct,
+            )
+            sell_notional = max(0.0, current_value - desired_remaining)
+            quantity = held_quantity if intent.target_allocation_pct == 0 else floor(
+                sell_notional / quote.last_price
+            )
+            if quantity <= 0:
+                return RiskDecision(
+                    approved=False,
+                    reason="Position is already at or below requested remaining allocation",
+                )
+            quantity = min(quantity, held_quantity)
+        else:
+            desired_notional = min(
+                portfolio.equity * intent.target_allocation_pct,
+                portfolio.equity * self.limits.max_position_pct,
+            )
+            additional_notional = max(0.0, desired_notional - current_value)
+            notional = min(additional_notional, portfolio.cash)
+            quantity = floor(notional / quote.last_price)
+            if quantity <= 0 and current_value >= desired_notional:
+                return RiskDecision(
+                    approved=False,
+                    reason="Position is already at or above target allocation",
+                )
 
         if quantity <= 0:
-            return RiskDecision(approved=False, reason="Insufficient capital for one share")
-
+            return RiskDecision(approved=False, reason="Insufficient capital or position size")
         if (
             intent.side == Side.BUY
             and intent.entry_max is not None
