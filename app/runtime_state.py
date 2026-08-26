@@ -45,7 +45,12 @@ class RuntimeStateStore:
             "history_warm_date": state.history_warm_date,
             "last_decisions": state.decisions,
         }
-        with NamedTemporaryFile("w", encoding="utf-8", dir=self.path.parent, delete=False) as handle:
+        with NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=self.path.parent,
+            delete=False,
+        ) as handle:
             json.dump(payload, handle, sort_keys=True)
             temp_path = Path(handle.name)
         temp_path.replace(self.path)
