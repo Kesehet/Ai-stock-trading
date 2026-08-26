@@ -22,8 +22,17 @@ class InstrumentToken:
     token: int
 
 
+@dataclass(frozen=True)
+class ZerodhaOrderStatus:
+    order_id: str
+    status: str
+    filled_quantity: int
+    pending_quantity: int
+    average_price: float
+
+
 class ZerodhaApi:
-    """Minimal Kite Connect v3 adapter used by both paper and live modes."""
+    """Minimal Kite Connect v3 market-data and live-broker adapter."""
 
     def __init__(
         self,
@@ -87,8 +96,13 @@ class ZerodhaApi:
         tokens: dict[str, int] = {}
         for row in rows:
             symbol = str(row.get("tradingsymbol") or "").upper()
-            if symbol in wanted and str(row.get("segment") or "").upper() in {"NSE", "NSE_EQ"}:
-                tokens[symbol] = int(row["instrument_token"])
+            if symbol not in wanted:
+                continue
+            segment = str(row.get("segment") or "").upper()
+            instrument_type = str(row.get("instrument_type") or "").upper()
+            if segment not in {"NSE", "NSE_EQ"} and instrument_type not in {"EQ", ""}:
+                continue
+            tokens[symbol] = int(row["instrument_token"])
         return tokens
 
     def historical_candles(
@@ -126,7 +140,7 @@ class ZerodhaApi:
             )
         return candles
 
-    def equity_cash(self) -> float:
+    def get_cash(self) -> float:
         data = self._get_json("/user/margins/equity")
         if not isinstance(data, dict):
             return 0.0
@@ -134,7 +148,7 @@ class ZerodhaApi:
         value = available.get("live_balance", data.get("net", available.get("cash", 0.0)))
         return float(value or 0.0)
 
-    def positions(self) -> list[Position]:
+    def get_positions(self) -> list[Position]:
         positions: dict[tuple[str, Product], Position] = {}
         holdings = self._get_json("/portfolio/holdings")
         for item in holdings or []:
@@ -170,6 +184,19 @@ class ZerodhaApi:
                 product=Product.INTRADAY,
             )
         return list(positions.values())
+
+    def order_status(self, order_id: str) -> ZerodhaOrderStatus | None:
+        data = self._get_json(f"/orders/{order_id}")
+        if not data:
+            return None
+        item = data[-1]
+        return ZerodhaOrderStatus(
+            order_id=str(item.get("order_id") or order_id),
+            status=str(item.get("status") or "UNKNOWN"),
+            filled_quantity=int(item.get("filled_quantity") or 0),
+            pending_quantity=int(item.get("pending_quantity") or 0),
+            average_price=float(item.get("average_price") or 0.0),
+        )
 
     def place_order(self, plan: OrderPlan) -> ExecutionResult:
         if plan.limit_price is None:
