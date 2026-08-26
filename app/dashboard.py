@@ -9,7 +9,9 @@ from urllib.parse import urlparse
 
 from app.config import AppMode, Settings
 from app.dashboard_store import DashboardSnapshotStore, PortfolioSnapshot
+from app.live_order_ledger import LiveOrderLedger
 from app.persistent_paper import PersistentPaperBroker
+from app.runtime_mode import RuntimeModeStore
 
 
 def _money(value: float) -> str:
@@ -19,6 +21,13 @@ def _money(value: float) -> str:
 
 def _pct(value: float) -> str:
     return f"{value:+.2f}%"
+
+
+def _active_mode(settings: Settings) -> AppMode:
+    return RuntimeModeStore(
+        Path(settings.data_dir) / "runtime-mode.json",
+        default_mode=settings.app_mode,
+    ).load().mode
 
 
 def _sparkline(values: list[float], width: int = 760, height: int = 170) -> str:
@@ -63,38 +72,49 @@ def _paper_fallback(settings: Settings) -> tuple[PortfolioSnapshot, list[tuple[s
     return snapshot, allocations
 
 
+def _live_fallback(settings: Settings) -> tuple[PortfolioSnapshot, list[tuple[str, float]]]:
+    ledger = LiveOrderLedger(Path(settings.data_dir) / "live-orders.sqlite3")
+    positions = ledger.managed_positions()
+    cash = ledger.managed_cash(settings.starting_cash)
+    deployed = sum(position.quantity * position.average_price for position in positions)
+    snapshot = PortfolioSnapshot(
+        captured_at=datetime.now(UTC),
+        cash=cash,
+        deployed=deployed,
+        holdings_value=deployed,
+        total_value=cash + deployed,
+    )
+    allocations = [
+        (position.symbol, position.quantity * position.average_price) for position in positions
+    ]
+    return snapshot, allocations
+
+
 def _dashboard_data(
     settings: Settings,
+    mode: AppMode,
 ) -> tuple[PortfolioSnapshot, list[PortfolioSnapshot], list[tuple[str, float]], bool]:
     store = DashboardSnapshotStore(Path(settings.data_dir) / "dashboard.sqlite3")
     latest = store.latest()
     history = store.history()
-    allocations: list[tuple[str, float]] = []
     is_marked = latest is not None
-
-    if settings.app_mode == AppMode.PAPER:
+    if mode == AppMode.LIVE:
+        fallback, allocations = _live_fallback(settings)
+    else:
         fallback, allocations = _paper_fallback(settings)
-        if latest is None:
-            latest = fallback
-            history = [fallback]
-    elif latest is None:
-        latest = PortfolioSnapshot(
-            captured_at=datetime.now(UTC),
-            cash=settings.starting_cash,
-            deployed=0,
-            holdings_value=0,
-            total_value=settings.starting_cash,
-        )
-        history = [latest]
+    if latest is None:
+        latest = fallback
+        history = [fallback]
     return latest, history, allocations, is_marked
 
 
 def render_dashboard(settings: Settings) -> str:
-    latest, history, allocations, is_marked = _dashboard_data(settings)
+    active_mode = _active_mode(settings)
+    latest, history, allocations, is_marked = _dashboard_data(settings, active_mode)
     starting = settings.starting_cash
     pnl = latest.total_value - starting
     pnl_pct = (pnl / starting * 100) if starting else 0.0
-    mode = "REAL" if settings.app_mode == AppMode.LIVE else "PAPER"
+    mode = "REAL" if active_mode == AppMode.LIVE else "PAPER"
     mode_class = "real" if mode == "REAL" else "paper"
     values = [item.total_value for item in history]
     chart = _sparkline(values)
@@ -113,9 +133,9 @@ def render_dashboard(settings: Settings) -> str:
         allocation_rows = '<div class="empty">No open positions yet.</div>'
 
     marked_note = (
-        "Marked using the latest portfolio valuation snapshot."
+        "Marked using the latest real market valuation snapshot."
         if is_marked
-        else "No live mark yet; open positions are temporarily shown at cost basis."
+        else "No market mark yet; open positions are temporarily shown at cost basis."
     )
     updated = latest.captured_at.astimezone().strftime("%d %b %Y, %I:%M %p")
     pnl_class = "positive" if pnl >= 0 else "negative"
@@ -164,8 +184,8 @@ h1 {{ margin:0; font-size:28px; letter-spacing:-.04em; }}
 <div class="mode {mode_class}">{mode} MODE</div>
 </header>
 <section class="grid">
-<div class="card"><div class="label">Starting capital</div><div class="value">{_money(starting)}</div><div class="small">Cash originally allocated</div></div>
-<div class="card"><div class="label">Capital deployed</div><div class="value">{_money(latest.deployed)}</div><div class="small">Money currently in positions</div></div>
+<div class="card"><div class="label">Starting capital</div><div class="value">{_money(starting)}</div><div class="small">Capital allocated to this fund</div></div>
+<div class="card"><div class="label">Capital deployed</div><div class="value">{_money(latest.deployed)}</div><div class="small">Money currently in bot-managed positions</div></div>
 <div class="card"><div class="label">Current value</div><div class="value">{_money(latest.total_value)}</div><div class="small">Cash + marked holdings</div></div>
 <div class="card"><div class="label">Total P&amp;L</div><div class="value {pnl_class}">{_money(pnl)}</div><div class="small {pnl_class}">{_pct(pnl_pct)} since start</div></div>
 </section>
@@ -176,7 +196,7 @@ h1 {{ margin:0; font-size:28px; letter-spacing:-.04em; }}
 <div class="footerline"><span>Cash: {_money(latest.cash)}</span><span>Updated {updated}</span></div>
 </div>
 <div class="card chart-card">
-<div class="chart-title"><strong>Where the money is</strong><span>Open positions</span></div>
+<div class="chart-title"><strong>Where the money is</strong><span>Bot-managed positions</span></div>
 {allocation_rows}
 <div class="footerline"><span>{html.escape(marked_note)}</span></div>
 </div>
