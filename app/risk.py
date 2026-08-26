@@ -22,6 +22,7 @@ class RiskLimits:
     max_daily_loss_pct: float = 0.01
     max_open_positions: int = 10
     max_quote_age_seconds: int = 15
+    min_buy_confidence: float = 0.60
 
 
 class RiskEngine:
@@ -54,6 +55,8 @@ class RiskEngine:
         daily_loss_limit = portfolio.equity * self.limits.max_daily_loss_pct
         if intent.side == Side.BUY and portfolio.daily_pnl <= -daily_loss_limit:
             return RiskDecision(approved=False, reason="Daily loss limit reached")
+        if intent.side == Side.BUY and intent.confidence < self.limits.min_buy_confidence:
+            return RiskDecision(approved=False, reason="AI confidence is below buy threshold")
 
         matching_positions = [
             position
