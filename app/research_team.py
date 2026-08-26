@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -12,7 +13,7 @@ from app.evidence.store import EvidenceStore
 from app.fundamentals import FundamentalStore
 from app.macro_context import MacroStore
 from app.market_data import HistoricalDataStore
-from app.models import Position, Product, Side, TradeIntent
+from app.models import Position, Product, Quote, Side, TradeIntent
 from app.portfolio_context import build_portfolio_context
 from app.technical_features import calculate_technical_features
 
@@ -111,6 +112,7 @@ class ResearchContextBuilder:
         fundamentals: FundamentalStore | None = None,
         macro: MacroStore | None = None,
         portfolio: PortfolioProvider | None = None,
+        live_quotes: Mapping[str, Quote] | None = None,
         max_candles: int = 60,
         max_evidence: int = 30,
     ) -> None:
@@ -119,19 +121,30 @@ class ResearchContextBuilder:
         self.fundamentals = fundamentals
         self.macro = macro
         self.portfolio = portfolio
+        self.live_quotes = live_quotes or {}
         self.max_candles = max_candles
         self.max_evidence = max_evidence
 
     def build(self, symbol: str, as_of: datetime) -> ResearchSnapshot:
-        candles = self.market_data.as_of(symbol, as_of, limit=self.max_candles)
-        evidence = self.evidence.list_as_of(as_of, symbol=symbol, limit=self.max_evidence)
-        market_text = "\n".join(
-            (
-                f"{item.timestamp.isoformat()} O={item.open:.2f} H={item.high:.2f} "
-                f"L={item.low:.2f} C={item.close:.2f} V={item.volume:.0f}"
+        normalized_symbol = symbol.upper()
+        candles = self.market_data.as_of(normalized_symbol, as_of, limit=self.max_candles)
+        evidence = self.evidence.list_as_of(
+            as_of,
+            symbol=normalized_symbol,
+            limit=self.max_evidence,
+        )
+        market_lines: list[str] = []
+        live_quote = self.live_quotes.get(normalized_symbol)
+        if live_quote is not None:
+            market_lines.append(
+                f"LIVE_QUOTE {live_quote.as_of.isoformat()} LTP={live_quote.last_price:.2f}"
             )
+        market_lines.extend(
+            f"{item.timestamp.isoformat()} O={item.open:.2f} H={item.high:.2f} "
+            f"L={item.low:.2f} C={item.close:.2f} V={item.volume:.0f}"
             for item in candles
         )
+        market_text = "\n".join(market_lines) or "NO_MARKET_DATA"
         technical_text = "NO_MARKET_DATA"
         if candles:
             technical_text = calculate_technical_features(candles).as_text()
@@ -142,10 +155,10 @@ class ResearchContextBuilder:
                 f"body={item.body[:600]}"
             )
             for item in evidence
-        )
+        ) or "NO_EVIDENCE_DATA"
         fundamental_text = "NO_FUNDAMENTAL_DATA"
         if self.fundamentals is not None:
-            snapshot = self.fundamentals.latest_as_of(symbol, as_of)
+            snapshot = self.fundamentals.latest_as_of(normalized_symbol, as_of)
             if snapshot is not None:
                 fundamental_text = snapshot.as_text()
         macro_text = "NO_MACRO_DATA"
@@ -156,14 +169,14 @@ class ResearchContextBuilder:
         portfolio_text = "NO_PORTFOLIO_DATA"
         if self.portfolio is not None:
             portfolio_text = build_portfolio_context(
-                symbol=symbol,
+                symbol=normalized_symbol,
                 positions=self.portfolio.get_positions(),
                 cash=self.portfolio.get_cash(),
                 market_data=self.market_data,
                 as_of=as_of,
             ).as_text()
         return ResearchSnapshot(
-            symbol=symbol.upper(),
+            symbol=normalized_symbol,
             as_of=as_of,
             market_text=market_text,
             technical_text=technical_text,
