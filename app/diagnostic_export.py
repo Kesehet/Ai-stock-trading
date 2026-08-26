@@ -7,29 +7,32 @@ from pathlib import Path
 from typing import Any
 
 
-def _table_rows(path: Path, table: str) -> list[dict[str, Any]]:
+def _query_rows(path: Path, query: str) -> list[dict[str, Any]]:
     if not path.exists():
         return []
     with sqlite3.connect(path) as connection:
         connection.row_factory = sqlite3.Row
-        exists = connection.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-            (table,),
-        ).fetchone()
-        if exists is None:
+        try:
+            rows = connection.execute(query).fetchall()
+        except sqlite3.OperationalError:
             return []
-        rows = connection.execute(f"SELECT * FROM {table}").fetchall()  # noqa: S608
     return [{key: row[key] for key in row.keys()} for row in rows]
 
 
 def build_diagnostic_export(data_dir: str | Path, starting_cash: float) -> bytes:
     root = Path(data_dir)
-    paper_orders = _table_rows(root / "paper.sqlite3", "paper_orders")
-    positions = _table_rows(root / "paper.sqlite3", "positions")
-    account = _table_rows(root / "paper.sqlite3", "account")
-    theses = _table_rows(root / "theses.sqlite3", "theses")
-    audit_events = _table_rows(root / "operations.sqlite3", "audit_events")
-    snapshots = _table_rows(root / "dashboard.sqlite3", "portfolio_snapshots")
+    paper_orders = _query_rows(root / "paper.sqlite3", "SELECT * FROM paper_orders")
+    positions = _query_rows(root / "paper.sqlite3", "SELECT * FROM positions")
+    account = _query_rows(root / "paper.sqlite3", "SELECT * FROM account")
+    theses = _query_rows(root / "theses.sqlite3", "SELECT * FROM theses")
+    audit_events = _query_rows(
+        root / "operations.sqlite3",
+        "SELECT * FROM audit_events ORDER BY id",
+    )
+    snapshots = _query_rows(
+        root / "dashboard.sqlite3",
+        "SELECT * FROM portfolio_snapshots ORDER BY captured_at",
+    )
 
     losses = []
     for order in paper_orders:
