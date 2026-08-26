@@ -29,13 +29,21 @@ class PersistentPaperBroker:
         return connection
 
     @staticmethod
-    def _ensure_column(connection: sqlite3.Connection, table: str, definition: str) -> None:
-        column = definition.split()[0]
+    def _migrate_order_columns(connection: sqlite3.Connection) -> None:
         columns = {
-            str(row[1]) for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(paper_orders)").fetchall()
         }
-        if column not in columns:
-            connection.execute(f"ALTER TABLE {table} ADD COLUMN {definition}")
+        migrations = {
+            "executed_at": "ALTER TABLE paper_orders ADD COLUMN executed_at TEXT NOT NULL DEFAULT ''",
+            "realized_pnl": "ALTER TABLE paper_orders ADD COLUMN realized_pnl REAL NOT NULL DEFAULT 0",
+            "reference_average_price": (
+                "ALTER TABLE paper_orders ADD COLUMN reference_average_price REAL"
+            ),
+        }
+        for column, statement in migrations.items():
+            if column not in columns:
+                connection.execute(statement)
 
     def _initialize(self) -> None:
         with self._connect() as connection:
@@ -70,9 +78,7 @@ class PersistentPaperBroker:
                 );
                 """
             )
-            self._ensure_column(connection, "paper_orders", "executed_at TEXT NOT NULL DEFAULT ''")
-            self._ensure_column(connection, "paper_orders", "realized_pnl REAL NOT NULL DEFAULT 0")
-            self._ensure_column(connection, "paper_orders", "reference_average_price REAL")
+            self._migrate_order_columns(connection)
             connection.execute(
                 """
                 INSERT OR IGNORE INTO account(singleton_id, cash)
