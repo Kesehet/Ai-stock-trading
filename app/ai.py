@@ -35,7 +35,7 @@ class OllamaClient:
         self.timeout_seconds = timeout_seconds
 
     @classmethod
-    def from_settings(cls, settings: Settings) -> "OllamaClient":
+    def from_settings(cls, settings: Settings) -> OllamaClient:
         env_key = settings.ollama_api_key.get_secret_value().strip()
         if env_key:
             return cls(
