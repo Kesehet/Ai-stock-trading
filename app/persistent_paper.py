@@ -35,8 +35,14 @@ class PersistentPaperBroker:
             for row in connection.execute("PRAGMA table_info(paper_orders)").fetchall()
         }
         migrations = {
-            "executed_at": "ALTER TABLE paper_orders ADD COLUMN executed_at TEXT NOT NULL DEFAULT ''",
-            "realized_pnl": "ALTER TABLE paper_orders ADD COLUMN realized_pnl REAL NOT NULL DEFAULT 0",
+            "executed_at": (
+                "ALTER TABLE paper_orders ADD COLUMN executed_at "
+                "TEXT NOT NULL DEFAULT ''"
+            ),
+            "realized_pnl": (
+                "ALTER TABLE paper_orders ADD COLUMN realized_pnl "
+                "REAL NOT NULL DEFAULT 0"
+            ),
             "reference_average_price": (
                 "ALTER TABLE paper_orders ADD COLUMN reference_average_price REAL"
             ),
