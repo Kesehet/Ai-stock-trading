@@ -53,6 +53,12 @@ class ZerodhaApi:
             "Authorization": f"token {self.api_key}:{self.session.access_token}",
         }
 
+    @staticmethod
+    def _data(payload: dict[str, Any]) -> Any:
+        if payload.get("status") != "success":
+            raise RuntimeError(str(payload.get("message") or "Zerodha API request failed"))
+        return payload.get("data")
+
     def _get_json(self, path: str, params: Any = None) -> Any:
         with httpx.Client(timeout=self.timeout_seconds) as client:
             response = client.get(
@@ -62,9 +68,7 @@ class ZerodhaApi:
             )
             response.raise_for_status()
             payload = response.json()
-        if payload.get("status") != "success":
-            raise RuntimeError(str(payload.get("message") or "Zerodha API request failed"))
-        return payload.get("data")
+        return self._data(payload)
 
     def quotes(self, symbols: tuple[str, ...] | list[str]) -> dict[str, Quote]:
         requested = [symbol.strip().upper() for symbol in symbols if symbol.strip()]
@@ -198,6 +202,17 @@ class ZerodhaApi:
             average_price=float(item.get("average_price") or 0.0),
         )
 
+    def cancel_order(self, order_id: str) -> str:
+        with httpx.Client(timeout=self.timeout_seconds) as client:
+            response = client.delete(
+                f"{KITE_API_BASE}/orders/regular/{order_id}",
+                headers=self.headers,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        data = self._data(payload) or {}
+        return str(data.get("order_id") or order_id)
+
     def place_order(self, plan: OrderPlan) -> ExecutionResult:
         if plan.limit_price is None:
             raise ValueError("live Zerodha orders require a limit price")
@@ -223,9 +238,8 @@ class ZerodhaApi:
             )
             response.raise_for_status()
             payload = response.json()
-        if payload.get("status") != "success":
-            raise RuntimeError(str(payload.get("message") or "Zerodha order placement failed"))
-        order_id = str((payload.get("data") or {})["order_id"])
+        data = self._data(payload) or {}
+        order_id = str(data["order_id"])
         return ExecutionResult(
             order_id=order_id,
             status="SUBMITTED",
