@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import UTC, datetime
 from pathlib import Path
 
 from app.brokers import ExecutionResult
@@ -26,6 +27,29 @@ class PersistentPaperBroker:
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA busy_timeout=10000")
         return connection
+
+    @staticmethod
+    def _migrate_order_columns(connection: sqlite3.Connection) -> None:
+        columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(paper_orders)").fetchall()
+        }
+        migrations = {
+            "executed_at": (
+                "ALTER TABLE paper_orders ADD COLUMN executed_at "
+                "TEXT NOT NULL DEFAULT ''"
+            ),
+            "realized_pnl": (
+                "ALTER TABLE paper_orders ADD COLUMN realized_pnl "
+                "REAL NOT NULL DEFAULT 0"
+            ),
+            "reference_average_price": (
+                "ALTER TABLE paper_orders ADD COLUMN reference_average_price REAL"
+            ),
+        }
+        for column, statement in migrations.items():
+            if column not in columns:
+                connection.execute(statement)
 
     def _initialize(self) -> None:
         with self._connect() as connection:
@@ -53,10 +77,14 @@ class PersistentPaperBroker:
                     quantity INTEGER NOT NULL,
                     price REAL NOT NULL,
                     status TEXT NOT NULL,
-                    filled_quantity INTEGER NOT NULL
+                    filled_quantity INTEGER NOT NULL,
+                    executed_at TEXT NOT NULL DEFAULT '',
+                    realized_pnl REAL NOT NULL DEFAULT 0,
+                    reference_average_price REAL
                 );
                 """
             )
+            self._migrate_order_columns(connection)
             connection.execute(
                 """
                 INSERT OR IGNORE INTO account(singleton_id, cash)
@@ -135,6 +163,7 @@ class PersistentPaperBroker:
             current_qty = int(position["quantity"]) if position is not None else 0
             current_avg = float(position["average_price"]) if position is not None else price
             notional = price * plan.quantity
+            realized_pnl = 0.0
 
             if plan.side == Side.BUY:
                 if notional > cash:
@@ -159,6 +188,7 @@ class PersistentPaperBroker:
                 if position is None or current_qty < plan.quantity:
                     raise ValueError("Cannot sell more than the paper position")
                 new_qty = current_qty - plan.quantity
+                realized_pnl = (price - current_avg) * plan.quantity
                 connection.execute(
                     "UPDATE account SET cash = ? WHERE singleton_id = 1",
                     (cash + notional,),
@@ -180,8 +210,9 @@ class PersistentPaperBroker:
             cursor = connection.execute(
                 """
                 INSERT INTO paper_orders(
-                    intent_id, symbol, side, product, quantity, price, status, filled_quantity
-                ) VALUES (?, ?, ?, ?, ?, ?, 'FILLED', ?)
+                    intent_id, symbol, side, product, quantity, price, status,
+                    filled_quantity, executed_at, realized_pnl, reference_average_price
+                ) VALUES (?, ?, ?, ?, ?, ?, 'FILLED', ?, ?, ?, ?)
                 """,
                 (
                     plan.intent_id,
@@ -191,6 +222,9 @@ class PersistentPaperBroker:
                     plan.quantity,
                     price,
                     plan.quantity,
+                    datetime.now(UTC).isoformat(),
+                    realized_pnl,
+                    current_avg,
                 ),
             )
             order_id = cursor.lastrowid

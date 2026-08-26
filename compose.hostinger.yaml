@@ -8,8 +8,9 @@ services:
     init: true
     environment:
       APP_MODE: ${APP_MODE:-paper}
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-https://ollama.com}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-gpt-oss:120b}
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
       STARTING_CASH: ${STARTING_CASH:-500000}
       MAX_POSITION_PCT: ${MAX_POSITION_PCT:-0.05}
       MAX_DAILY_LOSS_PCT: ${MAX_DAILY_LOSS_PCT:-0.01}
@@ -21,9 +22,6 @@ services:
       ZERODHA_API_KEY: ${ZERODHA_API_KEY:-}
       ZERODHA_API_SECRET: ${ZERODHA_API_SECRET:-}
       ZERODHA_ACCESS_TOKEN: ${ZERODHA_ACCESS_TOKEN:-}
-    networks:
-      - default
-      - ollama
     volumes:
       - trader-data:/var/lib/ai-stock-trading
     read_only: true
@@ -60,6 +58,10 @@ services:
       DATA_DIR: /var/lib/ai-stock-trading
       DASHBOARD_BIND_HOST: 0.0.0.0
       DASHBOARD_PORT: 8080
+      DASHBOARD_ADMIN_TOKEN: ${DASHBOARD_ADMIN_TOKEN:-}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-https://ollama.com}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gpt-oss:120b}
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
       LIVE_TRADING_ARMED: ${LIVE_TRADING_ARMED:-false}
       LIVE_TRADING_CONFIRMATION: ${LIVE_TRADING_CONFIRMATION:-}
       ZERODHA_API_KEY: ${ZERODHA_API_KEY:-}
@@ -101,8 +103,3 @@ services:
 
 volumes:
   trader-data:
-
-networks:
-  ollama:
-    external: true
-    name: ollama-xza7_default

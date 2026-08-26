@@ -35,14 +35,16 @@ jobs:
           docker-compose-path: compose.hostinger.yaml
           environment-variables: |
             APP_MODE=paper
-            OLLAMA_BASE_URL=http://ollama:11434
+            OLLAMA_BASE_URL=https://ollama.com
             OLLAMA_MODEL=gpt-oss:120b
+            OLLAMA_API_KEY=${{ secrets.OLLAMA_API_KEY }}
             STARTING_CASH=500000
             MAX_POSITION_PCT=0.05
             MAX_DAILY_LOSS_PCT=0.01
             MAX_OPEN_POSITIONS=10
             RUNTIME_POLL_SECONDS=10
             DASHBOARD_HOST_PORT=18080
+            DASHBOARD_ADMIN_TOKEN=${{ secrets.DASHBOARD_ADMIN_TOKEN }}
             LIVE_TRADING_ARMED=false
             LIVE_TRADING_CONFIRMATION=
             ZERODHA_API_KEY=${{ secrets.ZERODHA_API_KEY }}

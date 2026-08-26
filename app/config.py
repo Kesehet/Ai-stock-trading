@@ -27,8 +27,9 @@ class Settings(BaseSettings):
     )
 
     app_mode: AppMode = AppMode.PAPER
-    ollama_base_url: str = "http://localhost:11434"
+    ollama_base_url: str = "https://ollama.com"
     ollama_model: str = "gpt-oss:120b"
+    ollama_api_key: SecretStr = SecretStr("")
     starting_cash: float = Field(default=500_000, gt=0)
     max_position_pct: float = Field(default=0.05, gt=0, le=1)
     max_daily_loss_pct: float = Field(default=0.01, gt=0, le=1)
@@ -40,6 +41,7 @@ class Settings(BaseSettings):
     zerodha_api_key: str = ""
     zerodha_api_secret: SecretStr = SecretStr("")
     zerodha_access_token: SecretStr = SecretStr("")
+    dashboard_admin_token: SecretStr = SecretStr("")
 
     data_dir: str = "/var/lib/ai-stock-trading"
     heartbeat_path: str = Field(default_factory=_heartbeat_path)
