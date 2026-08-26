@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urlparse
 from app.config import Settings
 from app.dashboard import render_dashboard
 from app.diagnostic_export import build_diagnostic_export
+from app.ollama_credentials import OllamaCredentialStore, OllamaCredentials
 from app.operations import OperationsStore
 from app.zerodha_credentials import ZerodhaCredentialStore, ZerodhaCredentials
 from app.zerodha_session import ZerodhaAuthClient, ZerodhaSessionStore
@@ -43,10 +44,17 @@ h1{{margin:0 0 12px;font-size:24px}}p{{color:#a8bbb1;line-height:1.6}}a{{color:#
 </style></head><body><main><h1>{html.escape(title)}</h1><p>{html.escape(message)}</p>{extra}<p><a href="/">Back to dashboard</a></p></main></body></html>"""
 
 
-def _admin_tools(configured: bool, admin_enabled: bool) -> str:
-    status = "Zerodha credentials stored" if configured else "Zerodha credentials not stored yet"
+def _admin_tools(
+    zerodha_configured: bool,
+    ollama_configured: bool,
+    admin_enabled: bool,
+) -> str:
+    status = (
+        f"Zerodha: {'configured' if zerodha_configured else 'not configured'} · "
+        f"Ollama Cloud: {'configured' if ollama_configured else 'not configured'}"
+    )
     if not admin_enabled:
-        status += " · add DASHBOARD_ADMIN_TOKEN to GitHub production secrets to enable secure writes/exports"
+        status += " · admin setup disabled until DASHBOARD_ADMIN_TOKEN is configured"
     return f"""
 <style>
 .admin-tools{{margin-top:14px;background:rgba(10,22,17,.78);border:1px solid #20332a;border-radius:16px;padding:16px 18px;color:#8fa399}}
@@ -54,19 +62,23 @@ def _admin_tools(configured: bool, admin_enabled: bool) -> str:
 .admin-tools form{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:14px}}
 .admin-tools input{{width:100%;background:#08130f;color:#f3f7f4;border:1px solid #294238;border-radius:10px;padding:10px 12px}}
 .admin-tools button,.admin-tools a.button{{border:1px solid #315244;background:#10271d;color:#c9f6df;border-radius:10px;padding:10px 12px;font-weight:700;cursor:pointer;text-decoration:none;text-align:center}}
-.admin-note{{font-size:12px;margin-top:8px}}
-@media(max-width:720px){{.admin-tools form{{grid-template-columns:1fr}}}}
+.admin-note{{font-size:12px;margin-top:8px}}.wide{{grid-column:1/-1}}
+@media(max-width:720px){{.admin-tools form{{grid-template-columns:1fr}}.wide{{grid-column:auto}}}}
 </style>
 <details class="admin-tools">
-<summary>Broker setup &amp; export</summary>
+<summary>Connections &amp; export</summary>
 <div class="admin-note">{html.escape(status)}. Secrets are write-only and never included in exports.</div>
 <form method="post" action="/admin">
-<input type="password" name="admin_token" autocomplete="current-password" placeholder="Admin password" required>
-<input type="text" name="api_key" autocomplete="off" placeholder="Zerodha API key">
-<input type="password" name="api_secret" autocomplete="new-password" placeholder="Zerodha API secret">
-<button type="submit" name="action" value="save_credentials">Save Zerodha credentials</button>
+<input class="wide" type="password" name="admin_token" autocomplete="current-password" placeholder="Admin password" required>
+<input type="text" name="zerodha_api_key" autocomplete="off" placeholder="Zerodha API key">
+<input type="password" name="zerodha_api_secret" autocomplete="new-password" placeholder="Zerodha API secret">
+<button type="submit" name="action" value="save_zerodha">Save Zerodha</button>
+<input type="url" name="ollama_base_url" value="https://ollama.com" autocomplete="off" placeholder="Ollama Cloud URL">
+<input type="text" name="ollama_model" value="gpt-oss:120b" autocomplete="off" placeholder="Ollama model">
+<input type="password" name="ollama_api_key" autocomplete="new-password" placeholder="Ollama API key">
+<button type="submit" name="action" value="save_ollama">Save Ollama Cloud</button>
 <button type="submit" name="action" value="export">Export trading diagnostic</button>
-<a class="button" href="/zerodha/login">Connect / renew Zerodha session</a>
+<a class="button" href="/zerodha/login">Connect / renew Zerodha</a>
 </form>
 </details>
 """
@@ -84,6 +96,10 @@ class DashboardServerHandler(BaseHTTPRequestHandler):
         return ZerodhaCredentialStore(self.data_dir / "zerodha-credentials.json")
 
     @property
+    def ollama_store(self) -> OllamaCredentialStore:
+        return OllamaCredentialStore(self.data_dir / "ollama-credentials.json")
+
+    @property
     def session_store(self) -> ZerodhaSessionStore:
         return ZerodhaSessionStore(self.data_dir / "zerodha-session.json")
 
@@ -94,6 +110,9 @@ class DashboardServerHandler(BaseHTTPRequestHandler):
             return ZerodhaCredentials(api_key=api_key, api_secret=api_secret)
         return self.credential_store.load()
 
+    def _ollama_configured(self) -> bool:
+        return bool(self.settings.ollama_api_key.get_secret_value().strip()) or self.ollama_store.load() is not None
+
     def _admin_authorized(self, supplied: str) -> bool:
         expected = self.settings.dashboard_admin_token.get_secret_value()
         return bool(expected) and hmac.compare_digest(supplied, expected)
@@ -101,107 +120,95 @@ class DashboardServerHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         path = parsed.path
-
         if path == "/healthz":
             self.send_response(200)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.end_headers()
             self.wfile.write(b"ok")
             return
-
         if path == "/zerodha/callback":
             self._handle_zerodha_callback(parsed.query)
             return
-
         if path == "/zerodha/login":
             credentials = self._credentials()
             if credentials is None:
                 _write_html(self, 503, _message_page("Zerodha not configured", "Save the API key and secret first."))
                 return
             self.send_response(302)
-            self.send_header(
-                "Location",
-                ZerodhaAuthClient(credentials.api_key, credentials.api_secret).login_url(),
-            )
+            self.send_header("Location", ZerodhaAuthClient(credentials.api_key, credentials.api_secret).login_url())
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             return
-
         if path != "/":
             self.send_error(404)
             return
-
         page = render_dashboard(self.settings)
         controls = _admin_tools(
-            configured=self._credentials() is not None,
+            zerodha_configured=self._credentials() is not None,
+            ollama_configured=self._ollama_configured(),
             admin_enabled=bool(self.settings.dashboard_admin_token.get_secret_value()),
         )
-        page = page.replace("</main>", f"{controls}</main>")
-        _write_html(self, 200, page)
+        _write_html(self, 200, page.replace("</main>", f"{controls}</main>"))
 
     def do_POST(self) -> None:  # noqa: N802
         if urlparse(self.path).path != "/admin":
             self.send_error(404)
             return
-        raw_length = self.headers.get("Content-Length", "0")
         try:
-            length = int(raw_length)
+            length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
             self.send_error(400)
             return
         if length <= 0 or length > 16_384:
             self.send_error(413)
             return
-        payload = self.rfile.read(length).decode("utf-8")
-        params = parse_qs(payload, keep_blank_values=True)
+        params = parse_qs(self.rfile.read(length).decode("utf-8"), keep_blank_values=True)
         admin_token = params.get("admin_token", [""])[0]
         if not self.settings.dashboard_admin_token.get_secret_value():
-            _write_html(
-                self,
-                503,
-                _message_page(
-                    "Admin setup disabled",
-                    "Add DASHBOARD_ADMIN_TOKEN as a GitHub production secret and redeploy once.",
-                ),
-            )
+            _write_html(self, 503, _message_page("Admin setup disabled", "Configure DASHBOARD_ADMIN_TOKEN and redeploy once."))
             return
         if not self._admin_authorized(admin_token):
             _write_html(self, 403, _message_page("Access denied", "The dashboard admin password is incorrect."))
             return
-
         action = params.get("action", [""])[0]
-        if action == "save_credentials":
-            self._save_credentials(params)
+        if action == "save_zerodha":
+            self._save_zerodha(params)
+            return
+        if action == "save_ollama":
+            self._save_ollama(params)
             return
         if action == "export":
             self._export_diagnostic()
             return
         self.send_error(400)
 
-    def _save_credentials(self, params: dict[str, list[str]]) -> None:
-        api_key = params.get("api_key", [""])[0].strip()
-        api_secret = params.get("api_secret", [""])[0].strip()
+    def _save_zerodha(self, params: dict[str, list[str]]) -> None:
+        api_key = params.get("zerodha_api_key", [""])[0].strip()
+        api_secret = params.get("zerodha_api_secret", [""])[0].strip()
         try:
-            credentials = ZerodhaCredentials(api_key=api_key, api_secret=api_secret)
-            self.credential_store.save(credentials)
+            self.credential_store.save(ZerodhaCredentials(api_key=api_key, api_secret=api_secret))
             self.session_store.clear()
             OperationsStore(self.data_dir / "operations.sqlite3").append_event(
-                "broker",
-                "ZERODHA_CREDENTIALS_UPDATED",
-                {"api_key_suffix": api_key[-4:] if len(api_key) >= 4 else "****"},
+                "broker", "ZERODHA_CREDENTIALS_UPDATED", {"api_key_suffix": api_key[-4:] if len(api_key) >= 4 else "****"}
             )
         except ValueError as exc:
             _write_html(self, 400, _message_page("Invalid Zerodha credentials", str(exc)))
             return
-        _write_html(
-            self,
-            200,
-            _message_page(
-                "Zerodha credentials saved",
-                "Credentials were stored in the persistent server volume with restricted file permissions. The old session was cleared.",
-                '<p><a href="/zerodha/login">Connect Zerodha now</a></p>',
-            ),
-        )
+        _write_html(self, 200, _message_page("Zerodha credentials saved", "Saved securely. The old Zerodha session was cleared.", '<p><a href="/zerodha/login">Connect Zerodha now</a></p>'))
+
+    def _save_ollama(self, params: dict[str, list[str]]) -> None:
+        base_url = params.get("ollama_base_url", [""])[0].strip()
+        model = params.get("ollama_model", [""])[0].strip()
+        api_key = params.get("ollama_api_key", [""])[0].strip()
+        try:
+            self.ollama_store.save(OllamaCredentials(base_url=base_url, model=model, api_key=api_key))
+            OperationsStore(self.data_dir / "operations.sqlite3").append_event(
+                "ai", "OLLAMA_CLOUD_CREDENTIALS_UPDATED", {"base_url": base_url, "model": model}
+            )
+        except ValueError as exc:
+            _write_html(self, 400, _message_page("Invalid Ollama Cloud settings", str(exc)))
+            return
+        _write_html(self, 200, _message_page("Ollama Cloud saved", "Remote Ollama configuration was stored securely. No local Ollama fallback is enabled."))
 
     def _export_diagnostic(self) -> None:
         content = build_diagnostic_export(self.data_dir, self.settings.starting_cash)
@@ -220,49 +227,26 @@ class DashboardServerHandler(BaseHTTPRequestHandler):
         params = parse_qs(query)
         status = params.get("status", [""])[0]
         request_token = params.get("request_token", [""])[0]
-
         if status and status.lower() != "success":
             _write_html(self, 400, _message_page("Zerodha login failed", "Zerodha did not return a successful login status."))
             return
         if not request_token:
             _write_html(self, 400, _message_page("Missing request token", "The Zerodha callback did not include a request_token."))
             return
-
         credentials = self._credentials()
         if credentials is None:
             _write_html(self, 503, _message_page("Zerodha credentials not configured", "Save the API key and secret from the dashboard first."))
             return
-
         try:
-            session = ZerodhaAuthClient(
-                credentials.api_key,
-                credentials.api_secret,
-            ).exchange_request_token(request_token)
+            session = ZerodhaAuthClient(credentials.api_key, credentials.api_secret).exchange_request_token(request_token)
             self.session_store.save(session)
             OperationsStore(self.data_dir / "operations.sqlite3").append_event(
-                "broker",
-                "ZERODHA_SESSION_CONNECTED",
-                {"user_id": session.user_id, "expires_at": session.expires_at.isoformat()},
+                "broker", "ZERODHA_SESSION_CONNECTED", {"user_id": session.user_id, "expires_at": session.expires_at.isoformat()}
             )
         except Exception:
-            _write_html(
-                self,
-                502,
-                _message_page(
-                    "Zerodha session failed",
-                    "The request token could not be exchanged. Check the application credentials and try logging in again.",
-                ),
-            )
+            _write_html(self, 502, _message_page("Zerodha session failed", "The request token could not be exchanged. Check the application credentials and try again."))
             return
-
-        _write_html(
-            self,
-            200,
-            _message_page(
-                "Zerodha connected",
-                f"Market-data session connected for {session.user_id}. It expires at {session.expires_at.isoformat()}.",
-            ),
-        )
+        _write_html(self, 200, _message_page("Zerodha connected", f"Market-data session connected for {session.user_id}. It expires at {session.expires_at.isoformat()}."))
 
     def log_message(self, format: str, *args: object) -> None:
         return
@@ -271,11 +255,7 @@ class DashboardServerHandler(BaseHTTPRequestHandler):
 def main() -> None:
     settings = Settings()
     DashboardServerHandler.settings = settings
-    server = ThreadingHTTPServer(
-        (settings.dashboard_bind_host, settings.dashboard_port),
-        DashboardServerHandler,
-    )
-    server.serve_forever()
+    ThreadingHTTPServer((settings.dashboard_bind_host, settings.dashboard_port), DashboardServerHandler).serve_forever()
 
 
 if __name__ == "__main__":
