@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     zerodha_api_key: str = ""
     zerodha_api_secret: SecretStr = SecretStr("")
     zerodha_access_token: SecretStr = SecretStr("")
+    dashboard_admin_token: SecretStr = SecretStr("")
 
     data_dir: str = "/var/lib/ai-stock-trading"
     heartbeat_path: str = Field(default_factory=_heartbeat_path)
