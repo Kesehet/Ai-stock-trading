@@ -26,6 +26,20 @@ jobs:
           DASHBOARD_HOST_PORT: "18080"
         run: docker compose -f compose.hostinger.yaml config
 
+      - name: Capture current Hostinger container generation
+        id: previous
+        env:
+          HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY }}
+        run: |
+          set -euo pipefail
+          URL="https://developers.hostinger.com/api/vps/v1/virtual-machines/1058562/docker/ai-stock-trading/containers"
+          RESPONSE=$(curl --fail --silent --show-error \
+            -H "Authorization: Bearer $HOSTINGER_API_KEY" \
+            "$URL" || echo '[]')
+          IDS=$(echo "$RESPONSE" | jq -r 'sort_by(.name) | map(.id) | join(",")')
+          echo "ids=$IDS" >> "$GITHUB_OUTPUT"
+          echo "Existing container generation: ${IDS:-none}"
+
       - name: Deploy isolated Hostinger Docker project
         uses: hostinger/deploy-on-vps@b0868cec74bfa63af6bfa7bdb0dfee2f9bef13ea # v2
         with:
@@ -53,21 +67,27 @@ jobs:
             ZERODHA_API_KEY=${{ secrets.ZERODHA_API_KEY }}
             ZERODHA_API_SECRET=${{ secrets.ZERODHA_API_SECRET }}
 
-      - name: Wait for Hostinger containers to become healthy
+      - name: Wait for new Hostinger containers to become healthy
         env:
           HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY }}
+          PREVIOUS_IDS: ${{ steps.previous.outputs.ids }}
         run: |
           set -euo pipefail
           URL="https://developers.hostinger.com/api/vps/v1/virtual-machines/1058562/docker/ai-stock-trading/containers"
 
-          for attempt in $(seq 1 30); do
+          # Hostinger deployment is asynchronous. The old containers may remain healthy
+          # briefly after the deploy API returns, so a healthy old generation is not success.
+          sleep 10
+
+          for attempt in $(seq 1 36); do
             RESPONSE=$(curl --fail --silent --show-error \
               -H "Authorization: Bearer $HOSTINGER_API_KEY" \
               "$URL")
 
             COUNT=$(echo "$RESPONSE" | jq 'length')
-            SUMMARY=$(echo "$RESPONSE" | jq -r '[.[] | "\(.name): state=\(.state), health=\(.health // "n/a"), status=\(.status)"] | join(" | ")')
-            echo "Attempt $attempt/30: containers=$COUNT ${SUMMARY:+| $SUMMARY}"
+            CURRENT_IDS=$(echo "$RESPONSE" | jq -r 'sort_by(.name) | map(.id) | join(",")')
+            SUMMARY=$(echo "$RESPONSE" | jq -r '[.[] | "\(.name): id=\(.id), state=\(.state), health=\(.health // "n/a"), status=\(.status)"] | join(" | ")')
+            echo "Attempt $attempt/36: containers=$COUNT generation=$CURRENT_IDS ${SUMMARY:+| $SUMMARY}"
 
             FAILED=$(echo "$RESPONSE" | jq '[.[] | select(.state == "exited" or .state == "dead" or .health == "unhealthy")] | length')
             if [ "$FAILED" -gt 0 ]; then
@@ -76,15 +96,22 @@ jobs:
               exit 1
             fi
 
-            if echo "$RESPONSE" | jq -e 'length >= 2 and all(.[]; .state == "running" and (.health == null or .health == "" or .health == "healthy" or .health == "starting"))' >/dev/null; then
-              echo "Hostinger project ai-stock-trading is running."
+            GENERATION_CHANGED=false
+            if [ -z "$PREVIOUS_IDS" ] || [ "$CURRENT_IDS" != "$PREVIOUS_IDS" ]; then
+              GENERATION_CHANGED=true
+            fi
+
+            if [ "$GENERATION_CHANGED" = true ] && \
+               echo "$RESPONSE" | jq -e 'length >= 2 and all(.[]; .state == "running" and (.health == null or .health == "" or .health == "healthy"))' >/dev/null; then
+              echo "Hostinger project ai-stock-trading is running on a new healthy container generation."
               exit 0
             fi
 
             sleep 10
           done
 
-          echo "Timed out waiting for Hostinger project ai-stock-trading." >&2
+          echo "Timed out waiting for a new healthy Hostinger container generation." >&2
+          echo "Previous generation: ${PREVIOUS_IDS:-none}" >&2
           curl --silent --show-error \
             -H "Authorization: Bearer $HOSTINGER_API_KEY" \
             "https://developers.hostinger.com/api/vps/v1/virtual-machines/1058562/docker/ai-stock-trading/logs" || true
