@@ -4,6 +4,8 @@ import json
 import os
 from pathlib import Path
 
+import pytest
+
 from app.diagnostic_export import build_diagnostic_export
 from app.models import OrderPlan, Product, Side
 from app.ollama_credentials import OllamaCredentialStore, OllamaCredentials
@@ -37,6 +39,13 @@ def test_ollama_cloud_credentials_are_restricted_and_require_https(tmp_path: Pat
     assert store.load() == credentials
     if os.name == "posix":
         assert path.stat().st_mode & 0o777 == 0o600
+
+    with pytest.raises(ValueError, match="HTTPS"):
+        OllamaCredentials(
+            base_url="http://localhost:11434",
+            model="gpt-oss:120b",
+            api_key="cloud-secret",
+        )
 
 
 def test_diagnostic_export_includes_realized_losses_but_not_credentials(tmp_path: Path) -> None:
