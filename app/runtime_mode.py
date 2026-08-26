@@ -28,7 +28,12 @@ class RuntimeModeStore:
         if mode not in {AppMode.PAPER, AppMode.LIVE}:
             raise ValueError("runtime mode must be paper or live")
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with NamedTemporaryFile("w", encoding="utf-8", dir=self.path.parent, delete=False) as handle:
+        with NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=self.path.parent,
+            delete=False,
+        ) as handle:
             json.dump({"mode": mode.value}, handle)
             temp_path = Path(handle.name)
         temp_path.replace(self.path)
