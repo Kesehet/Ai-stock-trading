@@ -26,6 +26,17 @@ class LiveOrderRecord:
 class LiveOrderLedger:
     """Fail-closed idempotency and bot-owned live portfolio ledger."""
 
+    _PENDING_STATUSES = (
+        "PENDING_SEND",
+        "UNKNOWN",
+        "SUBMITTED",
+        "OPEN",
+        "TRIGGER PENDING",
+        "AMO REQ RECEIVED",
+        "VALIDATION PENDING",
+        "CANCEL_REQUESTED",
+    )
+
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -150,24 +161,28 @@ class LiveOrderLedger:
             updated_at=datetime.fromisoformat(str(row["updated_at"])),
         )
 
+    def get(self, intent_id: str) -> LiveOrderRecord | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM live_orders WHERE intent_id = ?",
+                (intent_id,),
+            ).fetchone()
+        return self._row(row) if row is not None else None
+
     def pending(self) -> list[LiveOrderRecord]:
+        placeholders = ",".join("?" for _ in self._PENDING_STATUSES)
         with self._connect() as connection:
             rows = connection.execute(
-                """
-                SELECT * FROM live_orders
-                WHERE status IN (
-                    'PENDING_SEND', 'UNKNOWN', 'SUBMITTED', 'OPEN',
-                    'TRIGGER PENDING', 'AMO REQ RECEIVED', 'VALIDATION PENDING'
-                )
-                ORDER BY created_at
-                """
+                f"SELECT * FROM live_orders WHERE status IN ({placeholders}) ORDER BY created_at",
+                self._PENDING_STATUSES,
             ).fetchall()
         return [self._row(row) for row in rows]
 
     def completed(self) -> list[LiveOrderRecord]:
+        """Return all known fills, including partial fills of cancelled/open orders."""
         with self._connect() as connection:
             rows = connection.execute(
-                "SELECT * FROM live_orders WHERE status = 'COMPLETE' ORDER BY created_at"
+                "SELECT * FROM live_orders WHERE filled_quantity > 0 ORDER BY created_at"
             ).fetchall()
         return [self._row(row) for row in rows]
 
