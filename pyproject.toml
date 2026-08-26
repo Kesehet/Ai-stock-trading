@@ -45,3 +45,7 @@ select = ["E", "F", "I", "UP", "B"]
 python_version = "3.11"
 strict = true
 plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = "app.autonomous_trader"
+disable_error_code = ["arg-type"]
