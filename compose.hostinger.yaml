@@ -8,7 +8,7 @@ services:
     init: true
     environment:
       APP_MODE: ${APP_MODE:-paper}
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-gpt-oss:120b}
       STARTING_CASH: ${STARTING_CASH:-500000}
       MAX_POSITION_PCT: ${MAX_POSITION_PCT:-0.05}
@@ -21,8 +21,9 @@ services:
       ZERODHA_API_KEY: ${ZERODHA_API_KEY:-}
       ZERODHA_API_SECRET: ${ZERODHA_API_SECRET:-}
       ZERODHA_ACCESS_TOKEN: ${ZERODHA_ACCESS_TOKEN:-}
-    extra_hosts:
-      - host.docker.internal:host-gateway
+    networks:
+      - default
+      - ollama
     volumes:
       - trader-data:/var/lib/ai-stock-trading
     read_only: true
@@ -52,7 +53,7 @@ services:
     image: ai-stock-trading:local
     restart: unless-stopped
     init: true
-    command: ["python", "-m", "app.dashboard"]
+    command: ["python", "-m", "app.dashboard_server"]
     environment:
       APP_MODE: ${APP_MODE:-paper}
       STARTING_CASH: ${STARTING_CASH:-500000}
@@ -91,6 +92,17 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.ai-stock-trading.rule=Host(`ai-stock-trading.srv1058562.hstgr.cloud`)
+      - traefik.http.routers.ai-stock-trading.entrypoints=websecure
+      - traefik.http.routers.ai-stock-trading.tls.certresolver=letsencrypt
+      - traefik.http.services.ai-stock-trading.loadbalancer.server.port=8080
 
 volumes:
   trader-data:
+
+networks:
+  ollama:
+    external: true
+    name: ollama-xza7_default
