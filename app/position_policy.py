@@ -46,6 +46,19 @@ class PositionPolicyStore:
         connection.execute("PRAGMA synchronous=FULL")
         return connection
 
+    @staticmethod
+    def _from_row(row: sqlite3.Row) -> PositionPolicy:
+        return PositionPolicy(
+            symbol=str(row["symbol"]),
+            product=Product(str(row["product"])),
+            stop_price=(float(row["stop_price"]) if row["stop_price"] is not None else None),
+            target_price=(
+                float(row["target_price"]) if row["target_price"] is not None else None
+            ),
+            thesis_id=str(row["thesis_id"]),
+            updated_at=datetime.fromisoformat(str(row["updated_at"])),
+        )
+
     def set(
         self,
         *,
@@ -100,18 +113,18 @@ class PositionPolicyStore:
                 """,
                 (symbol.upper(), product.value),
             ).fetchone()
-        if row is None:
-            return None
-        return PositionPolicy(
-            symbol=str(row["symbol"]),
-            product=Product(str(row["product"])),
-            stop_price=(float(row["stop_price"]) if row["stop_price"] is not None else None),
-            target_price=(
-                float(row["target_price"]) if row["target_price"] is not None else None
-            ),
-            thesis_id=str(row["thesis_id"]),
-            updated_at=datetime.fromisoformat(str(row["updated_at"])),
-        )
+        return self._from_row(row) if row is not None else None
+
+    def all(self) -> list[PositionPolicy]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT symbol, product, stop_price, target_price, thesis_id, updated_at
+                FROM position_policies
+                ORDER BY symbol, product
+                """
+            ).fetchall()
+        return [self._from_row(row) for row in rows]
 
     def clear(self, symbol: str, product: Product) -> None:
         with self._connect() as connection:
