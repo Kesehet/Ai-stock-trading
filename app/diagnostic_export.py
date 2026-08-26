@@ -108,12 +108,18 @@ def build_diagnostic_export(data_dir: str | Path, starting_cash: float) -> bytes
                 }
             )
 
+    live_losses = _live_realized_losses(live_orders, theses)
     payload = {
         "schema_version": 2,
         "generated_at": datetime.now(UTC).isoformat(),
         "starting_cash": starting_cash,
         "runtime_mode": _json_file(root / "runtime-mode.json").get("mode", "paper"),
         "runtime_state": _json_file(root / "runtime-state.json"),
+        # Backward-compatible paper aliases used by earlier analysis/tests.
+        "account": paper_account,
+        "positions": paper_positions,
+        "orders": paper_orders,
+        "realized_losses": paper_losses,
         "paper": {
             "account": paper_account,
             "positions": paper_positions,
@@ -122,7 +128,7 @@ def build_diagnostic_export(data_dir: str | Path, starting_cash: float) -> bytes
         },
         "live": {
             "bot_managed_orders": live_orders,
-            "realized_losses": _live_realized_losses(live_orders, theses),
+            "realized_losses": live_losses,
             "note": "Only orders initiated by this system are included; unrelated broker holdings are excluded.",
         },
         "theses": theses,
