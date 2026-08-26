@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from math import floor
 
-from app.models import OrderPlan, Quote, RiskDecision, Side, TradeIntent
+from app.models import OrderPlan, Position, Quote, RiskDecision, Side, TradeIntent
 
 
 @dataclass(frozen=True)
@@ -13,6 +13,7 @@ class PortfolioSnapshot:
     equity: float
     open_positions: int
     daily_pnl: float = 0.0
+    positions: tuple[Position, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -47,36 +48,37 @@ class RiskEngine:
             return RiskDecision(approved=False, reason="Quote is from the future")
         if quote_age > self.limits.max_quote_age_seconds:
             return RiskDecision(approved=False, reason="Quote is stale")
-
         if quote.symbol != intent.symbol:
             return RiskDecision(approved=False, reason="Quote symbol does not match intent")
 
         daily_loss_limit = portfolio.equity * self.limits.max_daily_loss_pct
         if portfolio.daily_pnl <= -daily_loss_limit:
             return RiskDecision(approved=False, reason="Daily loss limit reached")
-
         if portfolio.open_positions >= self.limits.max_open_positions and intent.side == Side.BUY:
             return RiskDecision(approved=False, reason="Maximum open positions reached")
 
-        requested_notional = portfolio.equity * intent.target_allocation_pct
-        max_notional = portfolio.equity * self.limits.max_position_pct
-        notional = min(requested_notional, max_notional, portfolio.cash)
-        quantity = floor(notional / quote.last_price)
+        if intent.side == Side.SELL:
+            held = sum(
+                position.quantity
+                for position in portfolio.positions
+                if position.symbol == intent.symbol and position.product == intent.product
+            )
+            if held <= 0:
+                return RiskDecision(approved=False, reason="No matching position available to sell")
+            requested_notional = portfolio.equity * intent.target_allocation_pct
+            requested_quantity = floor(requested_notional / quote.last_price)
+            quantity = held if requested_quantity <= 0 else min(held, requested_quantity)
+        else:
+            requested_notional = portfolio.equity * intent.target_allocation_pct
+            max_notional = portfolio.equity * self.limits.max_position_pct
+            notional = min(requested_notional, max_notional, portfolio.cash)
+            quantity = floor(notional / quote.last_price)
 
         if quantity <= 0:
-            return RiskDecision(approved=False, reason="Insufficient capital for one share")
-
-        if (
-            intent.side == Side.BUY
-            and intent.entry_max is not None
-            and quote.last_price > intent.entry_max
-        ):
+            return RiskDecision(approved=False, reason="Insufficient capital or position size")
+        if intent.side == Side.BUY and intent.entry_max is not None and quote.last_price > intent.entry_max:
             return RiskDecision(approved=False, reason="Price exceeds allowed entry range")
-        if (
-            intent.side == Side.BUY
-            and intent.entry_min is not None
-            and quote.last_price < intent.entry_min
-        ):
+        if intent.side == Side.BUY and intent.entry_min is not None and quote.last_price < intent.entry_min:
             return RiskDecision(approved=False, reason="Price is below allowed entry range")
 
         plan = OrderPlan(
