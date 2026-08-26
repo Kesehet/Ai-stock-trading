@@ -27,8 +27,8 @@ class Settings(BaseSettings):
     )
 
     app_mode: AppMode = AppMode.PAPER
-    ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "gpt-oss:120b"
+    ollama_base_url: str = "https://ollama.com"
+    ollama_model: str = "gpt-oss:120b-cloud"
     ollama_api_key: SecretStr = SecretStr("")
     starting_cash: float = Field(default=500_000, gt=0)
     max_position_pct: float = Field(default=0.05, gt=0, le=1)
