@@ -35,7 +35,7 @@ jobs:
           docker-compose-path: compose.hostinger.yaml
           environment-variables: |
             APP_MODE=paper
-            OLLAMA_BASE_URL=http://host.docker.internal:11434
+            OLLAMA_BASE_URL=http://ollama:11434
             OLLAMA_MODEL=gpt-oss:120b
             STARTING_CASH=500000
             MAX_POSITION_PCT=0.05
@@ -45,6 +45,8 @@ jobs:
             DASHBOARD_HOST_PORT=18080
             LIVE_TRADING_ARMED=false
             LIVE_TRADING_CONFIRMATION=
+            ZERODHA_API_KEY=${{ secrets.ZERODHA_API_KEY }}
+            ZERODHA_API_SECRET=${{ secrets.ZERODHA_API_SECRET }}
 
       - name: Wait for Hostinger containers to become healthy
         env:
