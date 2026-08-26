@@ -6,6 +6,7 @@ from pathlib import Path
 
 from app.diagnostic_export import build_diagnostic_export
 from app.models import OrderPlan, Product, Side
+from app.ollama_credentials import OllamaCredentialStore, OllamaCredentials
 from app.persistent_paper import PersistentPaperBroker
 from app.zerodha_credentials import ZerodhaCredentialStore, ZerodhaCredentials
 
@@ -14,6 +15,22 @@ def test_zerodha_credentials_are_persisted_with_restricted_permissions(tmp_path:
     path = tmp_path / "zerodha-credentials.json"
     store = ZerodhaCredentialStore(path)
     credentials = ZerodhaCredentials(api_key="test-key", api_secret="test-secret")
+
+    store.save(credentials)
+
+    assert store.load() == credentials
+    if os.name == "posix":
+        assert path.stat().st_mode & 0o777 == 0o600
+
+
+def test_ollama_cloud_credentials_are_restricted_and_require_https(tmp_path: Path) -> None:
+    path = tmp_path / "ollama-credentials.json"
+    store = OllamaCredentialStore(path)
+    credentials = OllamaCredentials(
+        base_url="https://ollama.com",
+        model="gpt-oss:120b",
+        api_key="cloud-secret",
+    )
 
     store.save(credentials)
 
@@ -47,6 +64,13 @@ def test_diagnostic_export_includes_realized_losses_but_not_credentials(tmp_path
     ZerodhaCredentialStore(tmp_path / "zerodha-credentials.json").save(
         ZerodhaCredentials(api_key="sensitive-key", api_secret="sensitive-secret")
     )
+    OllamaCredentialStore(tmp_path / "ollama-credentials.json").save(
+        OllamaCredentials(
+            base_url="https://ollama.com",
+            model="gpt-oss:120b",
+            api_key="sensitive-ollama-key",
+        )
+    )
 
     payload = json.loads(build_diagnostic_export(tmp_path, 100_000))
 
@@ -55,4 +79,5 @@ def test_diagnostic_export_includes_realized_losses_but_not_credentials(tmp_path
     serialized = json.dumps(payload)
     assert "sensitive-key" not in serialized
     assert "sensitive-secret" not in serialized
+    assert "sensitive-ollama-key" not in serialized
     assert payload["security"]["credentials_included"] is False
