@@ -61,6 +61,7 @@ class RiskEngine:
             if position.symbol == intent.symbol and position.product == intent.product
         ]
         held_quantity = sum(position.quantity for position in matching_positions)
+        current_value = held_quantity * quote.last_price
 
         if (
             portfolio.open_positions >= self.limits.max_open_positions
@@ -72,15 +73,21 @@ class RiskEngine:
         if intent.side == Side.SELL:
             if held_quantity <= 0:
                 return RiskDecision(approved=False, reason="No matching position available to sell")
-            requested_notional = portfolio.equity * intent.target_allocation_pct
-            requested_quantity = floor(requested_notional / quote.last_price)
-            quantity = (
-                held_quantity
-                if requested_quantity <= 0
-                else min(held_quantity, requested_quantity)
+            desired_remaining = min(
+                current_value,
+                portfolio.equity * intent.target_allocation_pct,
             )
+            sell_notional = max(0.0, current_value - desired_remaining)
+            quantity = held_quantity if intent.target_allocation_pct == 0 else floor(
+                sell_notional / quote.last_price
+            )
+            if quantity <= 0:
+                return RiskDecision(
+                    approved=False,
+                    reason="Position is already at or below requested remaining allocation",
+                )
+            quantity = min(quantity, held_quantity)
         else:
-            current_value = held_quantity * quote.last_price
             desired_notional = min(
                 portfolio.equity * intent.target_allocation_pct,
                 portfolio.equity * self.limits.max_position_pct,
