@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from app.brokers import ExecutionResult
 from app.live_order_ledger import LiveOrderLedger
 from app.models import OrderPlan, Position, Side
@@ -14,10 +16,12 @@ class ManagedLiveBroker:
         api: ZerodhaApi,
         ledger: LiveOrderLedger,
         starting_cash: float,
+        order_timeout_seconds: int = 120,
     ) -> None:
         self.api = api
         self.ledger = ledger
         self.starting_cash = starting_cash
+        self.order_timeout_seconds = order_timeout_seconds
 
     def get_cash(self) -> float:
         virtual_cash = self.ledger.managed_cash(self.starting_cash)
@@ -47,14 +51,35 @@ class ManagedLiveBroker:
         )
         return execution
 
-    def reconcile(self) -> list[tuple[str, str]]:
+    def reconcile(self, now: datetime | None = None) -> list[tuple[str, str]]:
+        current = now or datetime.now(UTC)
         updates: list[tuple[str, str]] = []
         for record in self.ledger.pending():
             if not record.broker_order_id:
-                # PENDING_SEND/UNKNOWN without an acknowledgement is intentionally not retried.
+                # A send whose acknowledgement is unknown is never retried automatically.
                 continue
             status = self.api.order_status(record.broker_order_id)
             if status is None:
+                continue
+            age = (current.astimezone(UTC) - record.created_at.astimezone(UTC)).total_seconds()
+            if (
+                status.status in {"OPEN", "SUBMITTED", "VALIDATION PENDING"}
+                and status.pending_quantity > 0
+                and age >= self.order_timeout_seconds
+            ):
+                try:
+                    self.api.cancel_order(record.broker_order_id)
+                    status_name = "CANCEL_REQUESTED"
+                except Exception:
+                    status_name = status.status
+                self.ledger.update(
+                    record.intent_id,
+                    broker_order_id=status.order_id,
+                    status=status_name,
+                    filled_quantity=status.filled_quantity,
+                    average_price=status.average_price if status.average_price > 0 else None,
+                )
+                updates.append((record.intent_id, status_name))
                 continue
             self.ledger.update(
                 record.intent_id,
