@@ -32,7 +32,9 @@ class Settings(BaseSettings):
     max_position_pct: float = Field(default=0.05, gt=0, le=1)
     max_daily_loss_pct: float = Field(default=0.01, gt=0, le=1)
     max_open_positions: int = Field(default=10, gt=0)
+    min_buy_confidence: float = Field(default=0.60, ge=0, le=1)
     paper_slippage_bps: float = Field(default=5.0, ge=0, le=100)
+    live_order_timeout_seconds: int = Field(default=120, ge=30, le=900)
 
     zerodha_api_key: str = ""
     zerodha_api_secret: SecretStr = SecretStr("")
