@@ -65,7 +65,11 @@ def build_diagnostic_export(data_dir: str | Path, starting_cash: float) -> bytes
         "security": {
             "credentials_included": False,
             "zerodha_session_included": False,
-            "note": "Broker secrets and access tokens are intentionally excluded.",
+            "ollama_api_key_included": False,
+            "note": (
+                "Broker credentials, Zerodha session tokens and Ollama API keys "
+                "are intentionally excluded."
+            ),
         },
     }
     return json.dumps(payload, indent=2, sort_keys=True, default=str).encode("utf-8")
