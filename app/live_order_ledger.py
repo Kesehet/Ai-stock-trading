@@ -170,10 +170,14 @@ class LiveOrderLedger:
         return self._row(row) if row is not None else None
 
     def pending(self) -> list[LiveOrderRecord]:
-        placeholders = ",".join("?" for _ in self._PENDING_STATUSES)
         with self._connect() as connection:
             rows = connection.execute(
-                f"SELECT * FROM live_orders WHERE status IN ({placeholders}) ORDER BY created_at",
+                """
+                SELECT *
+                FROM live_orders
+                WHERE status IN (?, ?, ?, ?, ?, ?, ?, ?)
+                ORDER BY created_at
+                """,
                 self._PENDING_STATUSES,
             ).fetchall()
         return [self._row(row) for row in rows]
