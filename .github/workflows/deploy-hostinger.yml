@@ -43,6 +43,7 @@ jobs:
             MAX_OPEN_POSITIONS=10
             RUNTIME_POLL_SECONDS=10
             DASHBOARD_HOST_PORT=18080
+            DASHBOARD_ADMIN_TOKEN=${{ secrets.DASHBOARD_ADMIN_TOKEN }}
             LIVE_TRADING_ARMED=false
             LIVE_TRADING_CONFIRMATION=
             ZERODHA_API_KEY=${{ secrets.ZERODHA_API_KEY }}
