@@ -9,7 +9,7 @@ services:
     environment:
       APP_MODE: ${APP_MODE:-paper}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-https://ollama.com}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-gpt-oss:120b-cloud}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gpt-oss:120b}
       OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
       STARTING_CASH: ${STARTING_CASH:-500000}
       MAX_POSITION_PCT: ${MAX_POSITION_PCT:-0.05}
@@ -60,7 +60,7 @@ services:
       DASHBOARD_PORT: 8080
       DASHBOARD_ADMIN_TOKEN: ${DASHBOARD_ADMIN_TOKEN:-}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-https://ollama.com}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-gpt-oss:120b-cloud}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gpt-oss:120b}
       OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
       LIVE_TRADING_ARMED: ${LIVE_TRADING_ARMED:-false}
       LIVE_TRADING_CONFIRMATION: ${LIVE_TRADING_CONFIRMATION:-}
