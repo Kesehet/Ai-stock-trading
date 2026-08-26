@@ -8,9 +8,9 @@ import pytest
 
 from app.diagnostic_export import build_diagnostic_export
 from app.models import OrderPlan, Product, Side
-from app.ollama_credentials import OllamaCredentialStore, OllamaCredentials
+from app.ollama_credentials import OllamaCredentials, OllamaCredentialStore
 from app.persistent_paper import PersistentPaperBroker
-from app.zerodha_credentials import ZerodhaCredentialStore, ZerodhaCredentials
+from app.zerodha_credentials import ZerodhaCredentials, ZerodhaCredentialStore
 
 
 def test_zerodha_credentials_are_persisted_with_restricted_permissions(tmp_path: Path) -> None:
