@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     max_position_pct: float = Field(default=0.05, gt=0, le=1)
     max_daily_loss_pct: float = Field(default=0.01, gt=0, le=1)
     max_open_positions: int = Field(default=10, gt=0)
+    paper_slippage_bps: float = Field(default=5.0, ge=0, le=100)
 
     zerodha_api_key: str = ""
     zerodha_api_secret: SecretStr = SecretStr("")
@@ -41,6 +42,7 @@ class Settings(BaseSettings):
     trading_watchlist: str = "TCS,INFY,RELIANCE,HDFCBANK,ICICIBANK,SBIN,LT,ITC,BHARTIARTL,AXISBANK"
     decision_interval_seconds: int = Field(default=900, ge=60, le=86_400)
     quote_poll_seconds: int = Field(default=10, ge=2, le=300)
+    max_ai_candidates: int = Field(default=3, ge=1, le=10)
 
     data_dir: str = "/var/lib/ai-stock-trading"
     heartbeat_path: str = Field(default_factory=_heartbeat_path)
