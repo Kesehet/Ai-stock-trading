@@ -129,7 +129,10 @@ def build_diagnostic_export(data_dir: str | Path, starting_cash: float) -> bytes
         "live": {
             "bot_managed_orders": live_orders,
             "realized_losses": live_losses,
-            "note": "Only orders initiated by this system are included; unrelated broker holdings are excluded.",
+            "note": (
+                "Only orders initiated by this system are included; "
+                "unrelated broker holdings are excluded."
+            ),
         },
         "theses": theses,
         "audit_events": audit_events,
