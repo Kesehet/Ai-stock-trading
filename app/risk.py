@@ -52,7 +52,7 @@ class RiskEngine:
             return RiskDecision(approved=False, reason="Quote symbol does not match intent")
 
         daily_loss_limit = portfolio.equity * self.limits.max_daily_loss_pct
-        if portfolio.daily_pnl <= -daily_loss_limit:
+        if intent.side == Side.BUY and portfolio.daily_pnl <= -daily_loss_limit:
             return RiskDecision(approved=False, reason="Daily loss limit reached")
 
         matching_positions = [
