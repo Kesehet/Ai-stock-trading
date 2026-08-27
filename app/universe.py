@@ -44,12 +44,15 @@ class DynamicNSEUniverse:
         self.rules = rules
         self.explicit_override = tuple(symbol.upper() for symbol in explicit_override)
         self.source = source or NSEInstrumentSource()
+        self._cached_symbols: tuple[str, ...] | None = None
 
     def _symbols(self) -> list[str]:
         if self.explicit_override:
             return sorted(set(self.explicit_override))
-        master = self.source.fetch()
-        return sorted({instrument.symbol for instrument in master.all()})
+        if self._cached_symbols is None:
+            master = self.source.fetch()
+            self._cached_symbols = tuple(sorted({instrument.symbol for instrument in master.all()}))
+        return list(self._cached_symbols)
 
     def select(self, as_of: datetime) -> list[UniverseCandidate]:
         if as_of.tzinfo is None:
