@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from statistics import mean
 
 from app.autonomous_trader import AutonomousTrader
+from app.config import Settings
 from app.history_loader import NSEHistoryLoader
 from app.models import Position, Quote
 from app.scheduler import IST
@@ -22,7 +23,7 @@ class ProductionAutonomousTrader(AutonomousTrader):
     implementation.
     """
 
-    def __init__(self, settings):  # type: ignore[no-untyped-def]
+    def __init__(self, settings: Settings) -> None:
         super().__init__(settings)
         self._nse_history = NSEHistoryLoader(self.data_dir / "nse-history")
         self._dynamic_ranked: tuple[str, ...] = ()
