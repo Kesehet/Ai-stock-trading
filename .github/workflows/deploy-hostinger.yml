@@ -24,6 +24,7 @@ jobs:
         env:
           APP_MODE: paper
           DASHBOARD_HOST_PORT: "18080"
+          TRADING_WATCHLIST: ""
         run: docker compose -f compose.hostinger.yaml config
 
       - name: Capture current Hostinger container generation
@@ -36,7 +37,7 @@ jobs:
           RESPONSE=$(curl --fail --silent --show-error \
             -H "Authorization: Bearer $HOSTINGER_API_KEY" \
             "$URL" || echo '[]')
-          IDS=$(echo "$RESPONSE" | jq -r 'sort_by(.name) | map(.id) | join(",")')
+          IDS=$(echo "$RESPONSE" | jq -r 'map(.id) | join(",")')
           echo "ids=$IDS" >> "$GITHUB_OUTPUT"
           echo "Existing container generation: ${IDS:-none}"
 
@@ -56,11 +57,17 @@ jobs:
             MAX_POSITION_PCT=0.05
             MAX_DAILY_LOSS_PCT=0.01
             MAX_OPEN_POSITIONS=10
+            MIN_BUY_CONFIDENCE=0.60
             PAPER_SLIPPAGE_BPS=5
-            TRADING_WATCHLIST=TCS,INFY,RELIANCE,HDFCBANK,ICICIBANK,SBIN,LT,ITC,BHARTIARTL,AXISBANK
+            TRADING_WATCHLIST=
             DECISION_INTERVAL_SECONDS=900
             QUOTE_POLL_SECONDS=10
-            MAX_AI_CANDIDATES=3
+            MAX_AI_CANDIDATES=5
+            UNIVERSE_HISTORY_DAYS=90
+            UNIVERSE_MIN_PRICE=20
+            UNIVERSE_MIN_HISTORY_BARS=20
+            UNIVERSE_MIN_AVG_TRADED_VALUE=50000000
+            UNIVERSE_SCAN_LIMIT=100
             RUNTIME_POLL_SECONDS=10
             DASHBOARD_HOST_PORT=18080
             DASHBOARD_ADMIN_TOKEN=${{ secrets.DASHBOARD_ADMIN_TOKEN }}
@@ -75,34 +82,38 @@ jobs:
           set -euo pipefail
           URL="https://developers.hostinger.com/api/vps/v1/virtual-machines/1058562/docker/ai-stock-trading/containers"
 
-          # Hostinger deployment is asynchronous. The old containers may remain healthy
-          # briefly after the deploy API returns, so a healthy old generation is not success.
+          # Hostinger replaces containers asynchronously. Old containers becoming
+          # dead/exited is normal during rollout; only judge containers whose IDs
+          # are not part of the pre-deploy generation.
           sleep 10
 
-          for attempt in $(seq 1 36); do
+          for attempt in $(seq 1 48); do
             RESPONSE=$(curl --fail --silent --show-error \
               -H "Authorization: Bearer $HOSTINGER_API_KEY" \
               "$URL")
 
-            COUNT=$(echo "$RESPONSE" | jq 'length')
-            CURRENT_IDS=$(echo "$RESPONSE" | jq -r 'sort_by(.name) | map(.id) | join(",")')
+            NEW_RESPONSE=$(echo "$RESPONSE" | jq --arg previous "$PREVIOUS_IDS" '
+              ($previous | split(",") | map(select(length > 0))) as $old |
+              [.[] | select(.id as $id | ($old | index($id) | not))]
+            ')
+            NEW_COUNT=$(echo "$NEW_RESPONSE" | jq 'length')
             SUMMARY=$(echo "$RESPONSE" | jq -r '[.[] | "\(.name): id=\(.id), state=\(.state), health=\(.health // "n/a"), status=\(.status)"] | join(" | ")')
-            echo "Attempt $attempt/36: containers=$COUNT generation=$CURRENT_IDS ${SUMMARY:+| $SUMMARY}"
+            echo "Attempt $attempt/48: new_containers=$NEW_COUNT ${SUMMARY:+| $SUMMARY}"
 
-            FAILED=$(echo "$RESPONSE" | jq '[.[] | select(.state == "exited" or .state == "dead" or .health == "unhealthy")] | length')
-            if [ "$FAILED" -gt 0 ]; then
-              echo "A Hostinger container entered a failed/unhealthy state." >&2
-              echo "$RESPONSE" | jq .
+            NEW_FAILED=$(echo "$NEW_RESPONSE" | jq '[.[] | select(.state == "exited" or .state == "dead" or .health == "unhealthy")] | length')
+            if [ "$NEW_FAILED" -gt 0 ]; then
+              echo "A new Hostinger container entered a failed/unhealthy state." >&2
+              echo "$NEW_RESPONSE" | jq .
+              curl --silent --show-error \
+                -H "Authorization: Bearer $HOSTINGER_API_KEY" \
+                "https://developers.hostinger.com/api/vps/v1/virtual-machines/1058562/docker/ai-stock-trading/logs" || true
               exit 1
             fi
 
-            GENERATION_CHANGED=false
-            if [ -z "$PREVIOUS_IDS" ] || [ "$CURRENT_IDS" != "$PREVIOUS_IDS" ]; then
-              GENERATION_CHANGED=true
-            fi
-
-            if [ "$GENERATION_CHANGED" = true ] && \
-               echo "$RESPONSE" | jq -e 'length >= 2 and all(.[]; .state == "running" and (.health == null or .health == "" or .health == "healthy"))' >/dev/null; then
+            if echo "$NEW_RESPONSE" | jq -e '
+              length >= 2 and
+              all(.[]; .state == "running" and (.health == null or .health == "" or .health == "healthy"))
+            ' >/dev/null; then
               echo "Hostinger project ai-stock-trading is running on a new healthy container generation."
               exit 0
             fi
