@@ -8,10 +8,12 @@ from threading import Event
 from time import sleep, time
 
 from app.config import AppMode, Settings
+from app.fund_engine import AutonomousFundEngine
 from app.nse_calendar import nse_capital_market_calendar
 from app.operations import OperationsStore
-from app.paper_fund import AutonomousPaperFund
+from app.persistent_paper import PersistentPaperBroker
 from app.scheduler import IST, MarketPhase
+from app.universe import UniverseRules
 from app.zerodha_market import ZerodhaQuoteProvider
 from app.zerodha_session import ZerodhaSessionStore
 
@@ -41,7 +43,7 @@ def _enforce_live_session_safety(
     return False
 
 
-def _paper_quote_provider(
+def _quote_provider(
     settings: Settings,
     session_store: ZerodhaSessionStore,
 ) -> ZerodhaQuoteProvider | None:
@@ -68,8 +70,8 @@ def main() -> None:
     session_store = ZerodhaSessionStore(data_dir / "zerodha-session.json")
     calendar = nse_capital_market_calendar()
     previous_phase: MarketPhase | None = None
-    paper_fund: AutonomousPaperFund | None = None
-    last_paper_cycle_monotonic = 0.0
+    fund: AutonomousFundEngine | None = None
+    last_cycle_monotonic = 0.0
 
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
@@ -78,21 +80,31 @@ def main() -> None:
     logger.info("runtime starting in %s mode", settings.app_mode.value)
 
     if settings.app_mode == AppMode.PAPER:
-        provider = _paper_quote_provider(settings, session_store)
+        provider = _quote_provider(settings, session_store)
         if provider is None:
             operations.append_event(
-                "paper",
+                "fund",
                 "DISABLED_NO_ZERODHA_SESSION",
                 {"reason": "API key/access token unavailable"},
             )
-            logger.error("paper fund disabled: Zerodha quote session is unavailable")
+            logger.error("autonomous fund disabled: Zerodha quote session is unavailable")
         else:
-            paper_fund = AutonomousPaperFund(
-                data_dir=data_dir,
+            broker = PersistentPaperBroker(
+                data_dir / "paper-account.sqlite3",
                 starting_cash=settings.starting_cash,
-                universe=settings.paper_universe,
+            )
+            fund = AutonomousFundEngine(
+                data_dir=data_dir,
+                broker=broker,
                 quote_provider=provider,
                 operations=operations,
+                explicit_universe=settings.paper_universe,
+                universe_rules=UniverseRules(
+                    candidate_limit=settings.universe_candidate_limit,
+                    min_price=settings.universe_min_price,
+                    min_history_bars=settings.universe_min_history_bars,
+                    min_avg_traded_value=settings.universe_min_avg_traded_value,
+                ),
                 ollama_base_url=settings.ollama_base_url,
                 ollama_model=settings.ollama_model,
                 max_position_pct=settings.max_position_pct,
@@ -101,13 +113,20 @@ def main() -> None:
                 history_days=settings.paper_history_days,
                 fallback_momentum=settings.paper_fallback_momentum,
                 fallback_target_pct=settings.paper_fallback_target_pct,
+                audit_category="fund",
             )
+            universe_mode = "override" if settings.paper_universe else "dynamic_nse_eq"
             operations.append_event(
-                "paper",
+                "fund",
                 "ENABLED",
-                {"universe": list(settings.paper_universe)},
+                {
+                    "mode": settings.app_mode.value,
+                    "universe_mode": universe_mode,
+                    "override": list(settings.paper_universe),
+                    "candidate_limit": settings.universe_candidate_limit,
+                },
             )
-            logger.info("autonomous paper fund enabled for %s", settings.paper_universe)
+            logger.info("autonomous fund enabled with universe mode=%s", universe_mode)
 
     if settings.app_mode == AppMode.LIVE:
         logger.warning(
@@ -130,27 +149,30 @@ def main() -> None:
             logger.info("market phase: %s", phase.value)
             previous_phase = phase
 
-        if paper_fund is not None and phase == MarketPhase.OPEN:
+        if fund is not None and phase == MarketPhase.OPEN:
             monotonic_now = time()
             due = (
-                last_paper_cycle_monotonic == 0.0
-                or monotonic_now - last_paper_cycle_monotonic >= settings.paper_cycle_seconds
+                last_cycle_monotonic == 0.0
+                or monotonic_now - last_cycle_monotonic >= settings.paper_cycle_seconds
             )
             if due:
                 try:
-                    result = paper_fund.run_cycle(now)
+                    result = fund.run_cycle(now)
                     logger.info(
-                        "paper cycle complete: orders=%s holds=%s rejected=%s errors=%s",
+                        "fund cycle complete: discovered=%s considered=%s orders=%s "
+                        "holds=%s rejected=%s errors=%s",
+                        result.discovered,
+                        result.considered,
                         result.orders,
                         result.holds,
                         result.rejected,
                         result.errors,
                     )
                 except Exception:
-                    logger.exception("paper fund cycle failed")
-                    operations.append_event("paper", "CYCLE_FATAL_ERROR", {})
+                    logger.exception("autonomous fund cycle failed")
+                    operations.append_event("fund", "CYCLE_FATAL_ERROR", {})
                 finally:
-                    last_paper_cycle_monotonic = monotonic_now
+                    last_cycle_monotonic = monotonic_now
 
         _write_heartbeat(heartbeat)
         sleep(settings.runtime_poll_seconds)
