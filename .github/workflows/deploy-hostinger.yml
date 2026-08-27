@@ -127,3 +127,22 @@ jobs:
             -H "Authorization: Bearer $HOSTINGER_API_KEY" \
             "https://developers.hostinger.com/api/vps/v1/virtual-machines/1058562/docker/ai-stock-trading/logs" || true
           exit 1
+
+      - name: Capture initial paper-fund activity
+        env:
+          HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY }}
+        run: |
+          set -euo pipefail
+          # Give the first market-open decision cycle time to complete. This is
+          # observability only: a HOLD or risk rejection is a valid paper result.
+          sleep 45
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $HOSTINGER_API_KEY" \
+            "https://developers.hostinger.com/api/vps/v1/virtual-machines/1058562/docker/ai-stock-trading/logs" \
+            | jq -r '
+              .[]
+              | select(.service == "trader-1")
+              | .entries[-120:]
+              | .[]
+              | "\(.timestamp // "") \(.line // "")"
+            '
