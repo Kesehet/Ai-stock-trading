@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from statistics import mean
 
 from app.market_data import HistoricalDataStore
@@ -27,9 +28,9 @@ class UniverseCandidate:
 class DynamicNSEUniverse:
     """Discovers NSE EQ symbols then deterministically screens/ranks them.
 
-    The same universe-selection code is used by paper and live modes. A caller may
-    pass an explicit override to intentionally constrain the mandate; otherwise the
-    official NSE equity-security master is the source of truth.
+    Paper and live modes use this exact selector. A non-empty explicit override
+    deliberately constrains the mandate; otherwise the official NSE EQ master is
+    the source of truth. Selection is point-in-time and never reads future candles.
     """
 
     def __init__(
@@ -50,10 +51,12 @@ class DynamicNSEUniverse:
         master = self.source.fetch()
         return sorted({instrument.symbol for instrument in master.all()})
 
-    def select(self) -> list[UniverseCandidate]:
+    def select(self, as_of: datetime) -> list[UniverseCandidate]:
+        if as_of.tzinfo is None:
+            raise ValueError("universe selection time must be timezone-aware")
         candidates: list[UniverseCandidate] = []
         for symbol in self._symbols():
-            history = self.market_data.as_of(symbol, cutoff=max_datetime(), limit=60)
+            history = self.market_data.as_of(symbol, cutoff=as_of, limit=60)
             if len(history) < self.rules.min_history_bars:
                 continue
             window = history[-20:]
@@ -65,7 +68,6 @@ class DynamicNSEUniverse:
                 continue
             first_close = window[0].close
             momentum_20 = (last.close / first_close) - 1 if first_close > 0 else 0.0
-            # Liquidity dominates; momentum is a secondary research-priority signal.
             score = avg_traded_value * (1.0 + max(-0.5, min(0.5, momentum_20)))
             candidates.append(
                 UniverseCandidate(
@@ -78,10 +80,3 @@ class DynamicNSEUniverse:
             )
         candidates.sort(key=lambda item: item.score, reverse=True)
         return candidates[: self.rules.candidate_limit]
-
-
-def max_datetime():
-    """Timezone-aware upper bound used because HistoricalDataStore is point-in-time."""
-    from datetime import UTC, datetime
-
-    return datetime.max.replace(tzinfo=UTC)
