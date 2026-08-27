@@ -34,17 +34,18 @@ class Settings(BaseSettings):
     max_daily_loss_pct: float = Field(default=0.01, gt=0, le=1)
     max_open_positions: int = Field(default=10, gt=0)
 
-    paper_universe: tuple[str, ...] = (
-        "RELIANCE",
-        "TCS",
-        "INFY",
-        "HDFCBANK",
-        "ICICIBANK",
-    )
+    # Empty means auto-discover and screen the NSE EQ universe. A non-empty list is
+    # an explicit operator override for testing or a deliberately constrained mandate.
+    paper_universe: tuple[str, ...] = ()
     paper_cycle_seconds: float = Field(default=900.0, ge=60.0, le=14_400.0)
     paper_history_days: int = Field(default=90, ge=30, le=730)
     paper_fallback_momentum: bool = True
     paper_fallback_target_pct: float = Field(default=0.03, gt=0, le=0.10)
+
+    universe_candidate_limit: int = Field(default=75, ge=5, le=500)
+    universe_min_price: float = Field(default=20.0, ge=0)
+    universe_min_history_bars: int = Field(default=20, ge=5, le=252)
+    universe_min_avg_traded_value: float = Field(default=50_000_000.0, ge=0)
 
     live_trading_armed: bool = False
     live_trading_confirmation: str = ""
@@ -68,8 +69,6 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_settings(self) -> "Settings":
-        if not self.paper_universe:
-            raise ValueError("PAPER_UNIVERSE cannot be empty")
         if self.app_mode != AppMode.LIVE:
             return self
         if not self.live_trading_armed:
