@@ -78,7 +78,6 @@ class OllamaClient:
             decoder = json.JSONDecoder()
             decoded, _ = decoder.raw_decode(text[start:])
 
-        # Some model gateways double-encode structured JSON as a JSON string.
         if isinstance(decoded, str):
             return OllamaClient._decode_json_object(decoded)
         return decoded
@@ -123,11 +122,14 @@ class OllamaClient:
                 format_value: object = schema if strict_schema else "json"
                 retry_prompt = prompt
                 if attempt > 1:
+                    previous_error = self._error_summary(
+                        last_error or ValueError("unknown")
+                    )
                     retry_prompt = "\n".join(
                         [
                             prompt,
                             "The previous response was invalid.",
-                            f"Validation problem: {self._error_summary(last_error or ValueError('unknown'))}",
+                            f"Validation problem: {previous_error}",
                             "Return ONLY one JSON object. No markdown or commentary.",
                             "The JSON must validate against this schema:",
                             schema_json,
@@ -161,7 +163,9 @@ class OllamaClient:
                 ) as exc:
                     last_error = exc
 
-        detail = self._error_summary(last_error or ValueError("unknown structured-output failure"))
+        detail = self._error_summary(
+            last_error or ValueError("unknown structured-output failure")
+        )
         raise ValueError(
             "Ollama failed to return schema-valid JSON after "
             f"{self.structured_retries} attempts: {detail}"
