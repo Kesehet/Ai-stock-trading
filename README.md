@@ -1,51 +1,71 @@
 # AI Stock Trading
 
-Autonomous Indian-equity research and trading platform built around a strict separation of concerns:
+Autonomous Indian cash-equity research, risk, backtesting, paper trading, and future live execution platform.
 
-- **GPT-OSS / Ollama** researches and proposes structured trade intents.
-- **Deterministic risk code** decides whether a proposal is executable and caps quantity/exposure.
-- **Broker adapters** execute only approved order plans.
-- **Paper/backtest modes** use the same intent → risk → execution boundary planned for live mode.
+## Core rule
 
-> This project is experimental trading infrastructure, not a promise of profitable returns. Live trading must remain disabled until backtesting, paper trading, broker reconciliation, operational controls and current Indian regulatory requirements have been validated.
+AI proposes trades. Deterministic code owns risk and execution approval.
 
-## Current milestone
+The production architecture intentionally uses the same trading pipeline in paper and live modes:
 
-The foundation branch implements:
+```text
+NSE universe -> deterministic screening -> research agents -> fund decision
+-> deterministic risk -> Broker
+```
 
-- Pydantic `TradeIntent`, `OrderPlan`, quote/position and risk-decision models.
-- Deterministic position sizing and risk rejection rules.
-- Broker protocol plus an in-memory `PaperBroker`.
-- Ollama structured-output client.
-- Tests proving AI-requested allocations cannot exceed deterministic risk caps.
-- CI with Ruff, mypy and pytest.
+Only the injected broker changes:
 
-No live broker adapter exists yet.
+- paper: `PersistentPaperBroker`
+- future live: `ZerodhaBroker`
 
-## Setup
+This prevents paper and production behavior from drifting apart.
+
+## Dynamic universe
+
+`PAPER_UNIVERSE` is empty by default. Empty means the service downloads the official NSE EQ security master, scans the available historical data for the whole exchange, filters out names that fail deterministic liquidity/history/price rules, ranks the survivors, and sends only the top candidates to the expensive multi-agent research stage.
+
+Set `PAPER_UNIVERSE=TCS,RELIANCE` only when deliberately constraining the mandate for debugging or a controlled test.
+
+Default screening controls:
+
+```text
+UNIVERSE_CANDIDATE_LIMIT=75
+UNIVERSE_MIN_PRICE=20
+UNIVERSE_MIN_HISTORY_BARS=20
+UNIVERSE_MIN_AVG_TRADED_VALUE=50000000
+```
+
+The candidate limit is applied after scanning the exchange; it is not a hardcoded stock universe.
+
+## Safety
+
+- Live mode requires explicit arming and an exact confirmation phrase.
+- Zerodha is read-only in paper mode.
+- No real-money order route is enabled yet.
+- Broker secrets are runtime secrets and must never be committed.
+- The Docker runtime is non-root, read-only where possible, capability-dropped, and resource bounded.
+
+## Development
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
 pip install -e '.[dev]'
-cp .env.example .env
+ruff check .
+mypy app
 pytest
-python -m app.demo
 ```
 
-## Ollama
+## Docker
 
-Run Ollama separately and configure `.env`:
-
-```env
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=gpt-oss:120b
+```bash
+cp .env.example .env
+docker compose up --build
 ```
 
-The LLM client requires output that validates against a Pydantic/JSON schema before it can enter the trading pipeline.
+The default Compose deployment starts in paper mode.
 
-## Safety invariant
+See:
 
-The AI never receives unrestricted broker-order authority. It emits a `TradeIntent`. Deterministic code validates market data, portfolio state and protected risk limits, then produces an `OrderPlan`. Only a broker adapter can execute the resulting plan.
-
-See `tasks.md` for the full roadmap.
+- `docs/status.md` for the current execution board
+- `docs/deployment.md` for deployment instructions
+- `docs/security-audit.md` for the security review
+- `tasks.md` for the full roadmap
