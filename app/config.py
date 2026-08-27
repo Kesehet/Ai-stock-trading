@@ -1,6 +1,4 @@
 from enum import StrEnum
-from pathlib import Path
-from tempfile import gettempdir
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -10,10 +8,6 @@ class AppMode(StrEnum):
     BACKTEST = "backtest"
     PAPER = "paper"
     LIVE = "live"
-
-
-def _heartbeat_path() -> str:
-    return str(Path(gettempdir()) / "ai-stock-trading-heartbeat")
 
 
 class Settings(BaseSettings):
@@ -54,7 +48,9 @@ class Settings(BaseSettings):
     universe_scan_limit: int = Field(default=100, ge=10, le=500)
 
     data_dir: str = "/var/lib/ai-stock-trading"
-    heartbeat_path: str = Field(default_factory=_heartbeat_path)
+    # This must live on the shared trader-data volume so the dashboard container
+    # can observe the trader process. /tmp is private to each container.
+    heartbeat_path: str = "/var/lib/ai-stock-trading/runtime-heartbeat"
     runtime_poll_seconds: float = Field(default=10.0, ge=1.0, le=300.0)
     dashboard_bind_host: str = "127.0.0.1"
     dashboard_port: int = Field(default=8080, ge=1024, le=65535)
