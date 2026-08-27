@@ -7,10 +7,10 @@ from pathlib import Path
 from threading import Event
 from time import sleep, time
 
-from app.autonomous_trader import AutonomousTrader
 from app.config import Settings
 from app.nse_calendar import nse_capital_market_calendar
 from app.operations import OperationsStore
+from app.production_trader import ProductionAutonomousTrader
 from app.scheduler import IST, MarketPhase
 
 logger = logging.getLogger("ai-stock-trading.runtime")
@@ -38,14 +38,24 @@ def main() -> None:
     data_dir.mkdir(parents=True, exist_ok=True)
     operations = OperationsStore(data_dir / "operations.sqlite3")
     calendar = nse_capital_market_calendar()
-    trader = AutonomousTrader(settings)
+    trader = ProductionAutonomousTrader(settings)
     previous_phase: MarketPhase | None = None
 
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
 
-    operations.append_event("runtime", "STARTED", {"default_mode": settings.app_mode.value})
-    logger.info("autonomous runtime started")
+    operations.append_event(
+        "runtime",
+        "STARTED",
+        {
+            "default_mode": settings.app_mode.value,
+            "universe_mode": "dynamic_nse" if settings.dynamic_universe else "watchlist_override",
+        },
+    )
+    logger.info(
+        "autonomous runtime started; universe=%s",
+        "dynamic_nse" if settings.dynamic_universe else "watchlist_override",
+    )
 
     while not _stop.is_set():
         now = datetime.now(IST)
