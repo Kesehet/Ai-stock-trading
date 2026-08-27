@@ -41,10 +41,17 @@ class Settings(BaseSettings):
     zerodha_access_token: SecretStr = SecretStr("")
     dashboard_admin_token: SecretStr = SecretStr("")
 
-    trading_watchlist: str = "TCS,INFY,RELIANCE,HDFCBANK,ICICIBANK,SBIN,LT,ITC,BHARTIARTL,AXISBANK"
+    # Empty means discover/rank NSE cash equities dynamically. A non-empty value
+    # deliberately constrains the mandate for debugging or an operator override.
+    trading_watchlist: str = ""
     decision_interval_seconds: int = Field(default=900, ge=60, le=86_400)
     quote_poll_seconds: int = Field(default=10, ge=2, le=300)
-    max_ai_candidates: int = Field(default=3, ge=1, le=10)
+    max_ai_candidates: int = Field(default=5, ge=1, le=25)
+    universe_history_days: int = Field(default=90, ge=30, le=365)
+    universe_min_price: float = Field(default=20.0, ge=0)
+    universe_min_history_bars: int = Field(default=20, ge=5, le=252)
+    universe_min_avg_traded_value: float = Field(default=50_000_000.0, ge=0)
+    universe_scan_limit: int = Field(default=100, ge=10, le=500)
 
     data_dir: str = "/var/lib/ai-stock-trading"
     heartbeat_path: str = Field(default_factory=_heartbeat_path)
@@ -54,13 +61,14 @@ class Settings(BaseSettings):
 
     @property
     def watchlist(self) -> tuple[str, ...]:
-        symbols = tuple(
+        return tuple(
             dict.fromkeys(
                 symbol.strip().upper()
                 for symbol in self.trading_watchlist.split(",")
                 if symbol.strip()
             )
         )
-        if not symbols:
-            raise ValueError("TRADING_WATCHLIST must contain at least one symbol")
-        return symbols
+
+    @property
+    def dynamic_universe(self) -> bool:
+        return not self.watchlist
