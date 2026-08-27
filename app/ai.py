@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TypeVar
+from typing import Any, TypeVar
 
 import httpx
 from pydantic import BaseModel, ValidationError
@@ -70,27 +70,75 @@ class OllamaClient:
         elif text.startswith("```") and text.endswith("```"):
             text = text[3:-3].strip()
         try:
-            return json.loads(text)
+            decoded: object = json.loads(text)
         except json.JSONDecodeError:
             start = text.find("{")
             if start < 0:
                 raise
             decoder = json.JSONDecoder()
             decoded, _ = decoder.raw_decode(text[start:])
-            return decoded
+
+        # Some model gateways double-encode structured JSON as a JSON string.
+        if isinstance(decoded, str):
+            return OllamaClient._decode_json_object(decoded)
+        return decoded
+
+    @staticmethod
+    def _response_payload(body: Any) -> object:
+        if not isinstance(body, dict):
+            raise ValueError("Ollama response body must be a JSON object")
+
+        raw = body.get("response")
+        if isinstance(raw, dict):
+            return raw
+        if isinstance(raw, str) and raw.strip():
+            return OllamaClient._decode_json_object(raw)
+
+        message = body.get("message")
+        if isinstance(message, dict):
+            content = message.get("content")
+            if isinstance(content, dict):
+                return content
+            if isinstance(content, str) and content.strip():
+                return OllamaClient._decode_json_object(content)
+
+        raise ValueError("Ollama response did not contain structured response content")
+
+    @staticmethod
+    def _error_summary(exc: Exception) -> str:
+        text = str(exc).replace("\n", " ").strip()
+        return text[:500] or type(exc).__name__
 
     def generate_structured(self, prompt: str, response_model: type[T]) -> T:
         schema = response_model.model_json_schema()
-        retry_prompt = prompt
+        schema_json = json.dumps(schema, separators=(",", ":"))
         last_error: Exception | None = None
 
         with httpx.Client(timeout=self.timeout_seconds) as client:
             for attempt in range(1, self.structured_retries + 1):
+                # Strict schema mode is preferred. If a model/gateway struggles with
+                # schema-constrained generation, later attempts request generic JSON
+                # while we continue enforcing the exact Pydantic schema locally.
+                strict_schema = attempt == 1
+                format_value: object = schema if strict_schema else "json"
+                retry_prompt = prompt
+                if attempt > 1:
+                    retry_prompt = "\n".join(
+                        [
+                            prompt,
+                            "The previous response was invalid.",
+                            f"Validation problem: {self._error_summary(last_error or ValueError('unknown'))}",
+                            "Return ONLY one JSON object. No markdown or commentary.",
+                            "The JSON must validate against this schema:",
+                            schema_json,
+                        ]
+                    )
+
                 payload = {
                     "model": self.model,
                     "prompt": retry_prompt,
                     "stream": False,
-                    "format": schema,
+                    "format": format_value,
                     "options": {"temperature": 0},
                 }
                 response = client.post(
@@ -99,31 +147,22 @@ class OllamaClient:
                     headers={"Authorization": f"Bearer {self.api_key}"},
                 )
                 response.raise_for_status()
-                body = response.json()
-                raw = body.get("response")
-                if not isinstance(raw, str):
-                    last_error = ValueError(
-                        "Ollama response did not contain a string response field"
-                    )
-                else:
-                    try:
-                        decoded = self._decode_json_object(raw)
-                        if not isinstance(decoded, dict):
-                            raise ValueError("Ollama structured response must be a JSON object")
-                        return response_model.model_validate(decoded)
-                    except (json.JSONDecodeError, ValidationError, ValueError) as exc:
-                        last_error = exc
 
-                if attempt < self.structured_retries:
-                    retry_prompt = "\n".join(
-                        [
-                            prompt,
-                            "CORRECTION: The previous response did not match the required schema.",
-                            "Return ONLY one JSON object matching the provided schema exactly.",
-                            "Do not return a scalar, markdown, commentary, or explanatory text.",
-                        ]
-                    )
+                try:
+                    decoded = self._response_payload(response.json())
+                    if not isinstance(decoded, dict):
+                        raise ValueError("Ollama structured response must be a JSON object")
+                    return response_model.model_validate(decoded)
+                except (
+                    json.JSONDecodeError,
+                    ValidationError,
+                    ValueError,
+                    TypeError,
+                ) as exc:
+                    last_error = exc
 
+        detail = self._error_summary(last_error or ValueError("unknown structured-output failure"))
         raise ValueError(
-            f"Ollama failed to return schema-valid JSON after {self.structured_retries} attempts"
+            "Ollama failed to return schema-valid JSON after "
+            f"{self.structured_retries} attempts: {detail}"
         ) from last_error
