@@ -4,8 +4,8 @@ import logging
 import signal
 from datetime import datetime
 from pathlib import Path
-from threading import Event
-from time import sleep, time
+from threading import Event, Thread
+from time import time
 
 from app.config import Settings
 from app.nse_calendar import nse_capital_market_calendar
@@ -26,6 +26,16 @@ def _write_heartbeat(path: Path) -> None:
     path.write_text(str(int(time())), encoding="utf-8")
 
 
+def _heartbeat_worker(path: Path, stop: Event, interval_seconds: float = 5.0) -> None:
+    """Maintain liveness independently from slow market-data/AI work."""
+    while not stop.is_set():
+        try:
+            _write_heartbeat(path)
+        except OSError:
+            logger.exception("failed to write runtime heartbeat")
+        stop.wait(interval_seconds)
+
+
 def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -43,6 +53,14 @@ def main() -> None:
 
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
+
+    heartbeat_thread = Thread(
+        target=_heartbeat_worker,
+        args=(heartbeat, _stop),
+        name="runtime-heartbeat",
+        daemon=True,
+    )
+    heartbeat_thread.start()
 
     operations.append_event(
         "runtime",
@@ -78,10 +96,10 @@ def main() -> None:
                 {"as_of": now.isoformat()},
                 now,
             )
-        _write_heartbeat(heartbeat)
-        sleep(settings.quote_poll_seconds)
+        _stop.wait(settings.quote_poll_seconds)
 
     operations.append_event("runtime", "STOPPED", {})
+    heartbeat_thread.join(timeout=2.0)
     heartbeat.unlink(missing_ok=True)
     logger.info("runtime stopped")
 
