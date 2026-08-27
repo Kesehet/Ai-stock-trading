@@ -68,13 +68,13 @@ class ProductionAutonomousTrader(AutonomousTrader):
             history = self.market_data.as_of(symbol, now, limit=20)
             if len(history) < self.settings.universe_min_history_bars:
                 continue
-            last = history[-1]
-            if last.close < self.settings.universe_min_price:
+            if min(candle.close for candle in history) < self.settings.universe_min_price:
                 continue
             avg_traded_value = mean(candle.close * candle.volume for candle in history)
             if avg_traded_value < self.settings.universe_min_avg_traded_value:
                 continue
             first = history[0].close
+            last = history[-1]
             momentum = (last.close / first) - 1 if first > 0 else 0.0
             bounded_momentum = max(-0.5, min(0.5, momentum))
             score = avg_traded_value * (1.0 + bounded_momentum)
