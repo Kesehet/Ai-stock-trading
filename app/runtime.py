@@ -10,7 +10,9 @@ from time import sleep, time
 from app.config import AppMode, Settings
 from app.nse_calendar import nse_capital_market_calendar
 from app.operations import OperationsStore
+from app.paper_fund import AutonomousPaperFund
 from app.scheduler import IST, MarketPhase
+from app.zerodha_market import ZerodhaQuoteProvider
 from app.zerodha_session import ZerodhaSessionStore
 
 logger = logging.getLogger("ai-stock-trading.runtime")
@@ -39,6 +41,19 @@ def _enforce_live_session_safety(
     return False
 
 
+def _paper_quote_provider(
+    settings: Settings,
+    session_store: ZerodhaSessionStore,
+) -> ZerodhaQuoteProvider | None:
+    access_token = settings.zerodha_access_token.get_secret_value()
+    session = session_store.load()
+    if session is not None and session.is_valid():
+        access_token = session.access_token
+    if not settings.zerodha_api_key or not access_token:
+        return None
+    return ZerodhaQuoteProvider(settings.zerodha_api_key, access_token)
+
+
 def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -53,12 +68,47 @@ def main() -> None:
     session_store = ZerodhaSessionStore(data_dir / "zerodha-session.json")
     calendar = nse_capital_market_calendar()
     previous_phase: MarketPhase | None = None
+    paper_fund: AutonomousPaperFund | None = None
+    last_paper_cycle_monotonic = 0.0
 
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
 
     operations.append_event("runtime", "STARTED", {"mode": settings.app_mode.value})
     logger.info("runtime starting in %s mode", settings.app_mode.value)
+
+    if settings.app_mode == AppMode.PAPER:
+        provider = _paper_quote_provider(settings, session_store)
+        if provider is None:
+            operations.append_event(
+                "paper",
+                "DISABLED_NO_ZERODHA_SESSION",
+                {"reason": "API key/access token unavailable"},
+            )
+            logger.error("paper fund disabled: Zerodha quote session is unavailable")
+        else:
+            paper_fund = AutonomousPaperFund(
+                data_dir=data_dir,
+                starting_cash=settings.starting_cash,
+                universe=settings.paper_universe,
+                quote_provider=provider,
+                operations=operations,
+                ollama_base_url=settings.ollama_base_url,
+                ollama_model=settings.ollama_model,
+                max_position_pct=settings.max_position_pct,
+                max_daily_loss_pct=settings.max_daily_loss_pct,
+                max_open_positions=settings.max_open_positions,
+                history_days=settings.paper_history_days,
+                fallback_momentum=settings.paper_fallback_momentum,
+                fallback_target_pct=settings.paper_fallback_target_pct,
+            )
+            operations.append_event(
+                "paper",
+                "ENABLED",
+                {"universe": list(settings.paper_universe)},
+            )
+            logger.info("autonomous paper fund enabled for %s", settings.paper_universe)
+
     if settings.app_mode == AppMode.LIVE:
         logger.warning(
             "LIVE mode is armed; broker execution adapter is still disabled in this build"
@@ -79,6 +129,29 @@ def main() -> None:
             )
             logger.info("market phase: %s", phase.value)
             previous_phase = phase
+
+        if paper_fund is not None and phase == MarketPhase.OPEN:
+            monotonic_now = time()
+            due = (
+                last_paper_cycle_monotonic == 0.0
+                or monotonic_now - last_paper_cycle_monotonic >= settings.paper_cycle_seconds
+            )
+            if due:
+                try:
+                    result = paper_fund.run_cycle(now)
+                    logger.info(
+                        "paper cycle complete: orders=%s holds=%s rejected=%s errors=%s",
+                        result.orders,
+                        result.holds,
+                        result.rejected,
+                        result.errors,
+                    )
+                except Exception:
+                    logger.exception("paper fund cycle failed")
+                    operations.append_event("paper", "CYCLE_FATAL_ERROR", {})
+                finally:
+                    last_paper_cycle_monotonic = monotonic_now
+
         _write_heartbeat(heartbeat)
         sleep(settings.runtime_poll_seconds)
 
