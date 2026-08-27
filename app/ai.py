@@ -128,7 +128,7 @@ class OllamaClient:
                     retry_prompt = "\n".join(
                         [
                             prompt,
-                            "The previous response was invalid.",
+                            "CORRECTION: The previous response was invalid.",
                             f"Validation problem: {previous_error}",
                             "Return ONLY one JSON object. No markdown or commentary.",
                             "The JSON must validate against this schema:",
