@@ -68,6 +68,13 @@ jobs:
             UNIVERSE_MIN_HISTORY_BARS=10
             UNIVERSE_MIN_AVG_TRADED_VALUE=50000000
             UNIVERSE_SCAN_LIMIT=100
+            INTRADAY_SCANNER_ENABLED=true
+            INTRADAY_SCAN_INTERVAL_SECONDS=60
+            INTRADAY_SCAN_POOL_LIMIT=500
+            INTRADAY_SCAN_BATCH_SIZE=125
+            INTRADAY_HOT_CANDIDATES=8
+            INTRADAY_HOT_SCORE_MIN=0.035
+            INTRADAY_INTERRUPT_COOLDOWN_SECONDS=300
             RUNTIME_POLL_SECONDS=10
             DASHBOARD_HOST_PORT=18080
             DASHBOARD_ADMIN_TOKEN=${{ secrets.DASHBOARD_ADMIN_TOKEN }}
@@ -133,16 +140,15 @@ jobs:
           HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY }}
         run: |
           set -euo pipefail
-          # Give the first market-open decision cycle time to complete. This is
-          # observability only: a HOLD or risk rejection is a valid paper result.
-          sleep 45
+          # Allow the first broad live scan plus initial promoted research to run.
+          sleep 75
           curl --fail --silent --show-error \
             -H "Authorization: Bearer $HOSTINGER_API_KEY" \
             "https://developers.hostinger.com/api/vps/v1/virtual-machines/1058562/docker/ai-stock-trading/logs" \
             | jq -r '
               .[]
               | select(.service == "trader-1")
-              | .entries[-120:]
+              | .entries[-160:]
               | .[]
               | "\(.timestamp // "") \(.line // "")"
             '
