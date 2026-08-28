@@ -47,6 +47,17 @@ class Settings(BaseSettings):
     universe_min_avg_traded_value: float = Field(default=50_000_000.0, ge=0)
     universe_scan_limit: int = Field(default=100, ge=10, le=500)
 
+    # Live intraday scanner. It is intentionally broader than the normal AI
+    # shortlist: cheap deterministic market-data scoring scans a large liquid
+    # pool, while only the hottest names are promoted to expensive AI research.
+    intraday_scanner_enabled: bool = True
+    intraday_scan_interval_seconds: int = Field(default=60, ge=15, le=900)
+    intraday_scan_pool_limit: int = Field(default=500, ge=25, le=2000)
+    intraday_scan_batch_size: int = Field(default=125, ge=25, le=250)
+    intraday_hot_candidates: int = Field(default=8, ge=1, le=25)
+    intraday_hot_score_min: float = Field(default=0.035, ge=0, le=2)
+    intraday_interrupt_cooldown_seconds: int = Field(default=300, ge=60, le=3600)
+
     data_dir: str = "/var/lib/ai-stock-trading"
     # This must live on the shared trader-data volume so the dashboard container
     # can observe the trader process. /tmp is private to each container.
