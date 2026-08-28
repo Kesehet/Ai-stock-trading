@@ -31,6 +31,18 @@ class ZerodhaOrderStatus:
     average_price: float
 
 
+@dataclass(frozen=True)
+class LiveMarketSnapshot:
+    symbol: str
+    last_price: float
+    open_price: float
+    high_price: float
+    low_price: float
+    previous_close: float
+    volume: float
+    as_of: datetime
+
+
 class ZerodhaApi:
     """Minimal Kite Connect v3 market-data and live-broker adapter."""
 
@@ -70,26 +82,55 @@ class ZerodhaApi:
             payload = response.json()
         return self._data(payload)
 
-    def quotes(self, symbols: tuple[str, ...] | list[str]) -> dict[str, Quote]:
+    @staticmethod
+    def _snapshot_time(item: dict[str, Any]) -> datetime:
+        raw_timestamp = item.get("timestamp") or item.get("last_trade_time")
+        if not raw_timestamp:
+            return datetime.now(IST)
+        parsed = datetime.fromisoformat(str(raw_timestamp))
+        return parsed.replace(tzinfo=IST) if parsed.tzinfo is None else parsed
+
+    def market_snapshots(
+        self,
+        symbols: tuple[str, ...] | list[str],
+    ) -> dict[str, LiveMarketSnapshot]:
         requested = [symbol.strip().upper() for symbol in symbols if symbol.strip()]
+        if not requested:
+            return {}
         params = [("i", f"NSE:{symbol}") for symbol in requested]
         data = self._get_json("/quote", params=params)
-        result: dict[str, Quote] = {}
+        result: dict[str, LiveMarketSnapshot] = {}
         for symbol in requested:
             item = data.get(f"NSE:{symbol}") if isinstance(data, dict) else None
             if not item:
                 continue
-            raw_timestamp = item.get("timestamp") or item.get("last_trade_time")
-            as_of = datetime.now(IST)
-            if raw_timestamp:
-                parsed = datetime.fromisoformat(str(raw_timestamp))
-                as_of = parsed.replace(tzinfo=IST) if parsed.tzinfo is None else parsed
-            result[symbol] = Quote(
+            ohlc = item.get("ohlc") or {}
+            last_price = float(item.get("last_price") or 0.0)
+            previous_close = float(ohlc.get("close") or 0.0)
+            if last_price <= 0 or previous_close <= 0:
+                continue
+            result[symbol] = LiveMarketSnapshot(
                 symbol=symbol,
-                last_price=float(item["last_price"]),
-                as_of=as_of,
+                last_price=last_price,
+                open_price=float(ohlc.get("open") or last_price),
+                high_price=float(ohlc.get("high") or last_price),
+                low_price=float(ohlc.get("low") or last_price),
+                previous_close=previous_close,
+                volume=float(item.get("volume") or 0.0),
+                as_of=self._snapshot_time(item),
             )
         return result
+
+    def quotes(self, symbols: tuple[str, ...] | list[str]) -> dict[str, Quote]:
+        snapshots = self.market_snapshots(symbols)
+        return {
+            symbol: Quote(
+                symbol=symbol,
+                last_price=snapshot.last_price,
+                as_of=snapshot.as_of,
+            )
+            for symbol, snapshot in snapshots.items()
+        }
 
     def instrument_tokens(self, symbols: tuple[str, ...] | list[str]) -> dict[str, int]:
         wanted = {symbol.strip().upper() for symbol in symbols if symbol.strip()}
