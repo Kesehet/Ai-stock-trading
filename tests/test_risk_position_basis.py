@@ -51,12 +51,12 @@ def test_average_down_rejects_target_below_blended_cost() -> None:
         RiskLimits(
             max_position_pct=0.10,
             min_buy_confidence=0.55,
-            max_trade_risk_pct=0.02,
+            max_trade_risk_pct=0.10,
             min_reward_risk=1.5,
         )
     )
     decision = engine.evaluate(
-        _intent(stop=88.0, target=96.0),
+        _intent(stop=91.0, target=94.0, allocation=0.012),
         _quote(92.0),
         _portfolio(average_price=100.0),
         now=datetime(2026, 8, 28, 9, 30, tzinfo=UTC),
@@ -96,7 +96,7 @@ def test_add_is_allowed_when_blended_reward_risk_remains_sound() -> None:
         )
     )
     decision = engine.evaluate(
-        _intent(stop=90.0, target=125.0),
+        _intent(stop=90.0, target=130.0),
         _quote(105.0),
         _portfolio(average_price=100.0, quantity=50),
         now=datetime(2026, 8, 28, 9, 30, tzinfo=UTC),
