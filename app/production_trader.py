@@ -1,17 +1,20 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta
 from statistics import mean, pstdev
 from threading import Lock
 
-from app.autonomous_trader import AutonomousTrader
-from app.config import Settings
+from app.autonomous_trader import AutonomousTrader, PortfolioBroker
+from app.config import AppMode, Settings
 from app.history_loader import NSEHistoryLoader
 from app.intraday_scanner import IntradayOpportunity, IntradayOpportunityScanner
 from app.market_data import Candle
 from app.models import Position, Quote
 from app.scheduler import IST, MarketPhase
 from app.zerodha_api import LiveMarketSnapshot, ZerodhaApi
+
+logger = logging.getLogger("ai-stock-trading.production")
 
 
 class ProductionAutonomousTrader(AutonomousTrader):
@@ -339,3 +342,97 @@ class ProductionAutonomousTrader(AutonomousTrader):
         return (
             now - previous
         ).total_seconds() >= self.settings.intraday_interrupt_cooldown_seconds
+
+    def tick(self, now: datetime | None = None) -> None:
+        """Execute at most one deep research pass so hot priority stays fresh."""
+        current = now or datetime.now(IST)
+        if current.tzinfo is None:
+            raise ValueError("runtime tick time must be timezone-aware")
+        mode = self.mode_store.load().mode
+        if mode != self._last_mode:
+            self.operations.append_event(
+                "runtime",
+                "MODE_ACTIVE",
+                {"mode": mode.value},
+                current,
+            )
+            logger.warning("runtime mode is now %s", mode.value)
+            self._last_mode = mode
+
+        api = self._api()
+        if api is None:
+            return
+        try:
+            self._warm_history(api, current)
+        except Exception:
+            logger.exception("market history warm-up failed")
+
+        if mode == AppMode.LIVE:
+            broker: PortfolioBroker = self._live_broker(api)
+            self._reconcile_live(broker, current)
+        else:
+            broker = self.paper_broker
+
+        positions = broker.get_positions()
+        try:
+            quotes = self._quotes_for_portfolio(api, positions)
+        except Exception:
+            logger.exception("live quote refresh failed")
+            return
+        if not quotes:
+            return
+
+        portfolio, dashboard_snapshot = self._valuation(broker, quotes, current)
+        self._write_nav(dashboard_snapshot, current)
+        if self.calendar.phase_at(current) != MarketPhase.OPEN:
+            return
+
+        self._protective_exits(
+            mode=mode,
+            broker=broker,
+            quotes=quotes,
+            now=current,
+        )
+
+        daily_loss_active = portfolio.daily_pnl <= -(
+            portfolio.equity * self.settings.max_daily_loss_pct
+        )
+        safe_mode = mode == AppMode.LIVE and self.operations.get_safety_state().safe_mode
+        if daily_loss_active:
+            self.operations.append_event(
+                "risk",
+                "DAILY_LOSS_LIMIT_ACTIVE",
+                {"daily_pnl": portfolio.daily_pnl, "equity": portfolio.equity},
+                current,
+            )
+
+        candidates = self._candidates(
+            broker.get_positions(),
+            current,
+            allow_new_buys=not daily_loss_active and not safe_mode,
+        )
+        for symbol in candidates:
+            if symbol not in quotes or not self._decision_due(symbol, current):
+                continue
+            self.operations.append_event(
+                "research",
+                "RESEARCH_STARTED",
+                {
+                    "symbol": symbol,
+                    "priority": "hot" if symbol in self._intraday_hot else "normal",
+                },
+                current,
+            )
+            self._research_and_trade(
+                symbol=symbol,
+                mode=mode,
+                broker=broker,
+                api=api,
+                quotes=quotes,
+                now=current,
+                new_buys_blocked=daily_loss_active or safe_mode,
+            )
+            # Deliberately return after one expensive multi-agent pass. The next
+            # runtime tick rebuilds candidates from the latest radar state, so a
+            # newly-hot stock never sits behind a stale serial research backlog.
+            return
