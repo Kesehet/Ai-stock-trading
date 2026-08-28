@@ -28,6 +28,8 @@ class IntradayOpportunityScanner:
 
     _OPEN = time(9, 15)
     _CLOSE = time(15, 30)
+    _HISTORY_SYMBOLS = 20
+    _HISTORY_POINTS_PER_SYMBOL = 240
 
     def __init__(
         self,
@@ -36,17 +38,21 @@ class IntradayOpportunityScanner:
     ) -> None:
         self.market_data = market_data
         self.state_path = Path(state_path) if state_path is not None else None
-        self._previous_prices = self._load_previous_prices()
+        payload = self._load_state()
+        self._previous_prices = self._load_previous_prices(payload)
+        self._opportunity_history = self._load_opportunity_history(payload)
 
-    def _load_previous_prices(self) -> dict[str, float]:
+    def _load_state(self) -> dict[str, object]:
         if self.state_path is None or not self.state_path.exists():
             return {}
         try:
             payload = json.loads(self.state_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return {}
-        if not isinstance(payload, dict):
-            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    @staticmethod
+    def _load_previous_prices(payload: dict[str, object]) -> dict[str, float]:
         prices = payload.get("previous_prices")
         if not isinstance(prices, dict):
             return {}
@@ -62,14 +68,31 @@ class IntradayOpportunityScanner:
                 result[symbol.upper()] = price
         return result
 
-    def _save_previous_prices(self) -> None:
+    @staticmethod
+    def _load_opportunity_history(
+        payload: dict[str, object],
+    ) -> dict[str, list[dict[str, object]]]:
+        raw = payload.get("opportunity_history")
+        if not isinstance(raw, dict):
+            return {}
+        result: dict[str, list[dict[str, object]]] = {}
+        for symbol, items in raw.items():
+            if not isinstance(symbol, str) or not isinstance(items, list):
+                continue
+            clean = [item for item in items if isinstance(item, dict)]
+            if clean:
+                result[symbol.upper()] = clean[-240:]
+        return result
+
+    def _save_state(self, now: datetime) -> None:
         if self.state_path is None:
             return
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.state_path.with_suffix(f"{self.state_path.suffix}.tmp")
         payload = {
-            "updated_at": datetime.now(IST).isoformat(),
+            "updated_at": now.astimezone(IST).isoformat(),
             "previous_prices": self._previous_prices,
+            "opportunity_history": self._opportunity_history,
         }
         try:
             temporary.write_text(
@@ -169,6 +192,47 @@ class IntradayOpportunityScanner:
             acceleration_pct=acceleration,
         )
 
+    def _record_history(
+        self,
+        opportunities: list[IntradayOpportunity],
+        snapshots: dict[str, LiveMarketSnapshot],
+        now: datetime,
+    ) -> None:
+        local_date = now.astimezone(IST).date().isoformat()
+        for symbol in list(self._opportunity_history):
+            points = self._opportunity_history[symbol]
+            recent = [
+                point
+                for point in points
+                if str(point.get("session_date") or "") == local_date
+            ]
+            if recent:
+                self._opportunity_history[symbol] = recent[-self._HISTORY_POINTS_PER_SYMBOL :]
+            else:
+                self._opportunity_history.pop(symbol, None)
+
+        for item in opportunities[: self._HISTORY_SYMBOLS]:
+            symbol = item.symbol.upper()
+            snapshot = snapshots.get(item.symbol) or snapshots.get(symbol)
+            if snapshot is None or snapshot.last_price <= 0:
+                continue
+            points = self._opportunity_history.setdefault(symbol, [])
+            points.append(
+                {
+                    "at": now.astimezone(IST).isoformat(),
+                    "session_date": local_date,
+                    "price": snapshot.last_price,
+                    "score": item.score,
+                    "move_pct": item.move_pct,
+                    "gap_pct": item.gap_pct,
+                    "breakout_pct": item.breakout_pct,
+                    "volume_pace": item.volume_pace,
+                    "intraday_position": item.intraday_position,
+                    "acceleration_pct": item.acceleration_pct,
+                }
+            )
+            self._opportunity_history[symbol] = points[-self._HISTORY_POINTS_PER_SYMBOL :]
+
     def rank(
         self,
         snapshots: dict[str, LiveMarketSnapshot],
@@ -179,6 +243,8 @@ class IntradayOpportunityScanner:
             for snapshot in snapshots.values()
             if (opportunity := self._score_one(snapshot, now)) is not None
         ]
+        opportunities.sort(key=lambda item: (item.score, item.move_pct), reverse=True)
+        self._record_history(opportunities, snapshots, now)
         self._previous_prices.update(
             {
                 symbol.upper(): snapshot.last_price
@@ -186,6 +252,5 @@ class IntradayOpportunityScanner:
                 if snapshot.last_price > 0
             }
         )
-        self._save_previous_prices()
-        opportunities.sort(key=lambda item: (item.score, item.move_pct), reverse=True)
+        self._save_state(now)
         return opportunities

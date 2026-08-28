@@ -13,6 +13,7 @@ from app.nse_calendar import nse_capital_market_calendar
 from app.operations import OperationsStore
 from app.runtime_mode import RuntimeModeStore
 from app.scheduler import IST
+from app.trade_quality import build_trade_quality
 
 
 def _safe_event(event: dict[str, Any]) -> dict[str, Any]:
@@ -291,6 +292,7 @@ def build_fund_status(settings: Settings, now: datetime | None = None) -> dict[s
     paper = _paper_state(data_dir / "paper.sqlite3")
     scanner_state = _read_json(data_dir / "intraday-scanner-state.json")
     position_diagnostics = _position_diagnostics(paper, scanner_state)
+    trade_quality = build_trade_quality(paper, scanner_state)
 
     heartbeat = Path(settings.heartbeat_path)
     heartbeat_age_seconds: float | None = None
@@ -338,7 +340,7 @@ def build_fund_status(settings: Settings, now: datetime | None = None) -> dict[s
     )
 
     return {
-        "schema_version": 4,
+        "schema_version": 5,
         "generated_at": current.isoformat(),
         "mode": mode.value,
         "market_phase": nse_capital_market_calendar(current).phase_at(current).value,
@@ -367,6 +369,7 @@ def build_fund_status(settings: Settings, now: datetime | None = None) -> dict[s
         },
         "paper_broker": paper,
         "position_diagnostics": position_diagnostics,
+        "trade_quality": trade_quality,
         "nav_history": nav_payload,
         "runtime_state": _read_json(data_dir / "runtime-state.json"),
         "scanner_state": scanner_state,
