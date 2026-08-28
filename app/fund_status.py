@@ -99,6 +99,133 @@ def _paper_state(path: Path) -> dict[str, Any]:
         connection.close()
 
 
+def _scanner_prices(scanner_state: object | None) -> tuple[str | None, dict[str, float]]:
+    if not isinstance(scanner_state, dict):
+        return None, {}
+    updated_at = scanner_state.get("updated_at")
+    raw_prices = scanner_state.get("previous_prices")
+    if not isinstance(raw_prices, dict):
+        return str(updated_at) if isinstance(updated_at, str) else None, {}
+    prices: dict[str, float] = {}
+    for raw_symbol, raw_price in raw_prices.items():
+        if not isinstance(raw_symbol, str):
+            continue
+        try:
+            price = float(raw_price)
+        except (TypeError, ValueError):
+            continue
+        if price > 0:
+            prices[raw_symbol.upper()] = price
+    return str(updated_at) if isinstance(updated_at, str) else None, prices
+
+
+def _position_diagnostics(
+    paper: dict[str, Any],
+    scanner_state: object | None,
+) -> dict[str, Any]:
+    mark_updated_at, prices = _scanner_prices(scanner_state)
+    positions = paper.get("positions")
+    if not isinstance(positions, list):
+        positions = []
+
+    marked: list[dict[str, Any]] = []
+    for item in positions:
+        if not isinstance(item, dict):
+            continue
+        symbol = str(item.get("symbol") or "").upper()
+        if not symbol:
+            continue
+        try:
+            quantity = int(item.get("quantity") or 0)
+            average_price = float(item.get("average_price") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        mark_price = prices.get(symbol)
+        cost_basis = quantity * average_price
+        market_value = quantity * mark_price if mark_price is not None else None
+        unrealized_pnl = (
+            quantity * (mark_price - average_price)
+            if mark_price is not None
+            else None
+        )
+        unrealized_pnl_pct = (
+            (mark_price / average_price) - 1.0
+            if mark_price is not None and average_price > 0
+            else None
+        )
+        marked.append(
+            {
+                "symbol": symbol,
+                "product": item.get("product"),
+                "quantity": quantity,
+                "average_price": round(average_price, 4),
+                "mark_price": round(mark_price, 4) if mark_price is not None else None,
+                "cost_basis": round(cost_basis, 2),
+                "market_value": round(market_value, 2) if market_value is not None else None,
+                "unrealized_pnl": round(unrealized_pnl, 2)
+                if unrealized_pnl is not None
+                else None,
+                "unrealized_pnl_pct": round(unrealized_pnl_pct * 100, 4)
+                if unrealized_pnl_pct is not None
+                else None,
+            }
+        )
+
+    measurable = [
+        item for item in marked if isinstance(item.get("unrealized_pnl"), (int, float))
+    ]
+    losers = sorted(
+        (item for item in measurable if float(item["unrealized_pnl"]) < 0),
+        key=lambda item: float(item["unrealized_pnl"]),
+    )
+    winners = sorted(
+        (item for item in measurable if float(item["unrealized_pnl"]) > 0),
+        key=lambda item: float(item["unrealized_pnl"]),
+        reverse=True,
+    )
+    unrealized_total = sum(float(item["unrealized_pnl"]) for item in measurable)
+
+    orders = paper.get("orders")
+    if not isinstance(orders, list):
+        orders = []
+    realized_trades: list[dict[str, Any]] = []
+    for order in orders:
+        if not isinstance(order, dict) or str(order.get("side") or "").upper() != "SELL":
+            continue
+        try:
+            realized = float(order.get("realized_pnl") or 0.0)
+            charges = float(order.get("charges") or 0.0)
+            quantity = int(order.get("quantity") or 0)
+            exit_price = float(order.get("price") or 0.0)
+            reference_average = float(order.get("reference_average_price") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        realized_trades.append(
+            {
+                "order_id": order.get("order_id"),
+                "symbol": order.get("symbol"),
+                "quantity": quantity,
+                "entry_cost_basis_per_share": round(reference_average, 4),
+                "exit_price": round(exit_price, 4),
+                "realized_pnl": round(realized, 2),
+                "exit_charges": round(charges, 2),
+                "executed_at": order.get("executed_at"),
+                "outcome": "win" if realized > 0 else "loss" if realized < 0 else "flat",
+            }
+        )
+
+    return {
+        "mark_updated_at": mark_updated_at,
+        "positions": marked,
+        "material_unrealized_losers": losers,
+        "unrealized_winners": winners,
+        "unrealized_pnl_total": round(unrealized_total, 2),
+        "measured_positions": len(measurable),
+        "unmeasured_positions": len(marked) - len(measurable),
+        "recent_realized_trades": realized_trades[:40],
+    }
+
+
 def _event_diagnostics(events: list[dict[str, Any]]) -> dict[str, Any]:
     action_counts = Counter(str(item.get("action", "")) for item in events)
     category_counts = Counter(str(item.get("category", "")) for item in events)
@@ -162,6 +289,8 @@ def build_fund_status(settings: Settings, now: datetime | None = None) -> dict[s
     audit_events = [_safe_event(item) for item in operations.recent_events(limit=300)]
     safety = operations.get_safety_state()
     paper = _paper_state(data_dir / "paper.sqlite3")
+    scanner_state = _read_json(data_dir / "intraday-scanner-state.json")
+    position_diagnostics = _position_diagnostics(paper, scanner_state)
 
     heartbeat = Path(settings.heartbeat_path)
     heartbeat_age_seconds: float | None = None
@@ -209,7 +338,7 @@ def build_fund_status(settings: Settings, now: datetime | None = None) -> dict[s
     )
 
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "generated_at": current.isoformat(),
         "mode": mode.value,
         "market_phase": nse_capital_market_calendar(current).phase_at(current).value,
@@ -237,9 +366,10 @@ def build_fund_status(settings: Settings, now: datetime | None = None) -> dict[s
             "paper_charges": paper["charges"],
         },
         "paper_broker": paper,
+        "position_diagnostics": position_diagnostics,
         "nav_history": nav_payload,
         "runtime_state": _read_json(data_dir / "runtime-state.json"),
-        "scanner_state": _read_json(data_dir / "intraday-scanner-state.json"),
+        "scanner_state": scanner_state,
         "diagnostics": {
             **_event_diagnostics(audit_events),
             "recent_decisions": decisions[:40],
