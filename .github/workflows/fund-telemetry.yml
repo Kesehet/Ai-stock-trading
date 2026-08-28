@@ -7,6 +7,7 @@ on:
     - cron: "30 7 * * 1-5"
     - cron: "15 10 * * 1-5"
   workflow_dispatch:
+  # Temporary verification trigger. Removed after this diagnostic pass.
   push:
     paths:
       - ".github/workflows/fund-telemetry.yml"
@@ -19,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 1
     steps:
-      - name: Fetch deep fund telemetry
+      - name: Fetch and summarize deep fund telemetry
         shell: bash
         env:
           TELEMETRY_TOKEN: ${{ secrets.DASHBOARD_ADMIN_TOKEN }}
@@ -31,15 +32,55 @@ jobs:
             -H "Authorization: Bearer $TELEMETRY_TOKEN" \
             "$URL" -o fund-status.json
           jq -e . fund-status.json >/dev/null
-          echo "FUND_TELEMETRY_JSON_BEGIN"
-          jq -c . fund-status.json
-          echo "FUND_TELEMETRY_JSON_END"
+
+          # Publish only the diagnostic fields needed for remote analysis. The
+          # authenticated endpoint remains the source of full raw logs/history.
+          jq -c '
+            {
+              schema_version,
+              generated_at,
+              mode,
+              market_phase,
+              worker,
+              safety,
+              portfolio,
+              paper_broker: {
+                cash: .paper_broker.cash,
+                positions: .paper_broker.positions,
+                recent_orders: (.paper_broker.orders[:40]),
+                realized_pnl: .paper_broker.realized_pnl,
+                charges: .paper_broker.charges
+              },
+              runtime_state,
+              diagnostics: {
+                action_counts: .diagnostics.action_counts,
+                category_counts: .diagnostics.category_counts,
+                per_symbol_action_counts: .diagnostics.per_symbol_action_counts,
+                recent_decisions: (.diagnostics.recent_decisions[:30]),
+                recent_failures: (.diagnostics.recent_failures[:30]),
+                recent_risk_events: (.diagnostics.recent_risk_events[:40]),
+                recent_execution_events: (.diagnostics.recent_execution_events[:40]),
+                recent_intraday_scans: (.diagnostics.recent_intraday_scans[:10]),
+                error_log_excerpt: ([
+                  .diagnostics.trader_log_tail[]
+                  | select(test("ERROR|CRITICAL|Traceback|Exception|ValueError|HTTP [45][0-9][0-9]|failed|Failure"; "i"))
+                ][-80:])
+              },
+              active_configuration
+            }
+          ' fund-status.json > diagnostic-summary.json
+
+          echo "FUND_DIAGNOSTIC_JSON_BEGIN"
+          cat diagnostic-summary.json
+          echo
+          echo "FUND_DIAGNOSTIC_JSON_END"
+
           {
             echo "### Fund diagnostic snapshot"
             echo
-            jq -r '"Generated: \(.generated_at) | Mode: \(.mode) | Market: \(.market_phase) | NAV: ₹\(.portfolio.total_value) | P&L: ₹\(.portfolio.pnl_total) | Worker healthy: \(.worker.healthy)"' fund-status.json
+            jq -r '"Generated: \(.generated_at) | Mode: \(.mode) | Market: \(.market_phase) | NAV: ₹\(.portfolio.total_value) | P&L: ₹\(.portfolio.pnl_total) | Worker healthy: \(.worker.healthy)"' diagnostic-summary.json
             echo
             echo '```json'
-            jq '{generated_at,mode,market_phase,worker,safety,portfolio,diagnostics:{action_counts:.diagnostics.action_counts,per_symbol_action_counts:.diagnostics.per_symbol_action_counts,recent_failures:.diagnostics.recent_failures,recent_risk_events:.diagnostics.recent_risk_events,recent_execution_events:.diagnostics.recent_execution_events,recent_intraday_scans:.diagnostics.recent_intraday_scans},active_configuration}' fund-status.json
+            jq . diagnostic-summary.json
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
