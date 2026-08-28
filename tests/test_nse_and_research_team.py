@@ -141,5 +141,5 @@ def test_research_team_emits_structured_trade_intent(tmp_path) -> None:
 
     assert intent.side == Side.BUY
     assert intent.target_allocation_pct == 0.10
-    assert intent.strategy_id == "multi_agent_fund_v2"
+    assert intent.strategy_id == "multi_agent_fund_v3_active"
     assert intent.data_cutoff_at == as_of
