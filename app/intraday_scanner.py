@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime, time
+from pathlib import Path
 from statistics import mean
 
 from app.market_data import Candle, HistoricalDataStore
@@ -27,9 +29,56 @@ class IntradayOpportunityScanner:
     _OPEN = time(9, 15)
     _CLOSE = time(15, 30)
 
-    def __init__(self, market_data: HistoricalDataStore) -> None:
+    def __init__(
+        self,
+        market_data: HistoricalDataStore,
+        state_path: str | Path | None = None,
+    ) -> None:
         self.market_data = market_data
-        self._previous: dict[str, LiveMarketSnapshot] = {}
+        self.state_path = Path(state_path) if state_path is not None else None
+        self._previous_prices = self._load_previous_prices()
+
+    def _load_previous_prices(self) -> dict[str, float]:
+        if self.state_path is None or not self.state_path.exists():
+            return {}
+        try:
+            payload = json.loads(self.state_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        if not isinstance(payload, dict):
+            return {}
+        prices = payload.get("previous_prices")
+        if not isinstance(prices, dict):
+            return {}
+        result: dict[str, float] = {}
+        for symbol, value in prices.items():
+            if not isinstance(symbol, str):
+                continue
+            try:
+                price = float(value)
+            except (TypeError, ValueError):
+                continue
+            if price > 0:
+                result[symbol.upper()] = price
+        return result
+
+    def _save_previous_prices(self) -> None:
+        if self.state_path is None:
+            return
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.state_path.with_suffix(f"{self.state_path.suffix}.tmp")
+        payload = {
+            "updated_at": datetime.now(IST).isoformat(),
+            "previous_prices": self._previous_prices,
+        }
+        try:
+            temporary.write_text(
+                json.dumps(payload, separators=(",", ":"), sort_keys=True),
+                encoding="utf-8",
+            )
+            temporary.replace(self.state_path)
+        except OSError:
+            temporary.unlink(missing_ok=True)
 
     @classmethod
     def _session_fraction(cls, now: datetime) -> float:
@@ -86,10 +135,10 @@ class IntradayOpportunityScanner:
             else 0.5
         )
 
-        previous = self._previous.get(snapshot.symbol)
+        previous_price = self._previous_prices.get(snapshot.symbol.upper())
         acceleration = 0.0
-        if previous is not None and previous.last_price > 0:
-            acceleration = (snapshot.last_price / previous.last_price) - 1.0
+        if previous_price is not None and previous_price > 0:
+            acceleration = (snapshot.last_price / previous_price) - 1.0
 
         # The scanner rewards several distinct ways a stock can become interesting
         # right now: a large move, abnormal participation, a fresh breakout,
@@ -125,6 +174,13 @@ class IntradayOpportunityScanner:
             for snapshot in snapshots.values()
             if (opportunity := self._score_one(snapshot, now)) is not None
         ]
-        self._previous.update(snapshots)
+        self._previous_prices.update(
+            {
+                symbol.upper(): snapshot.last_price
+                for symbol, snapshot in snapshots.items()
+                if snapshot.last_price > 0
+            }
+        )
+        self._save_previous_prices()
         opportunities.sort(key=lambda item: (item.score, item.move_pct), reverse=True)
         return opportunities
