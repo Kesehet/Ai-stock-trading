@@ -6,29 +6,25 @@ from statistics import mean, pstdev
 from app.autonomous_trader import AutonomousTrader
 from app.config import Settings
 from app.history_loader import NSEHistoryLoader
+from app.intraday_scanner import IntradayOpportunity, IntradayOpportunityScanner
 from app.market_data import Candle
 from app.models import Position, Quote
 from app.scheduler import IST
-from app.zerodha_api import ZerodhaApi
+from app.zerodha_api import LiveMarketSnapshot, ZerodhaApi
 
 
 class ProductionAutonomousTrader(AutonomousTrader):
-    """Production trader with optional full-NSE dynamic universe discovery.
-
-    Paper and live modes use this same class. Execution mode is still selected by
-    the existing broker boundary in ``AutonomousTrader``; universe selection,
-    research, risk, scheduling and market data are shared.
-
-    An empty ``TRADING_WATCHLIST`` enables dynamic mode. A non-empty watchlist is
-    an explicit operator override and delegates to the established fixed-universe
-    implementation.
-    """
+    """Production trader with full-NSE discovery plus live opportunity scanning."""
 
     def __init__(self, settings: Settings) -> None:
         super().__init__(settings)
         self._nse_history = NSEHistoryLoader(self.data_dir / "nse-history")
         self._dynamic_ranked: tuple[str, ...] = ()
         self._last_candidate_bucket: int | None = None
+        self._intraday_scanner = IntradayOpportunityScanner(self.market_data)
+        self._last_intraday_scan: datetime | None = None
+        self._intraday_hot: tuple[str, ...] = ()
+        self._intraday_snapshots: dict[str, LiveMarketSnapshot] = {}
 
     def _warm_history(self, api: ZerodhaApi, now: datetime) -> None:
         if not self.settings.dynamic_universe:
@@ -48,6 +44,7 @@ class ProductionAutonomousTrader(AutonomousTrader):
         self._history_warmed_date = today
         self.state_store.set_history_warm(now.astimezone(IST).date())
         self._dynamic_ranked = self._rank_dynamic_universe(now)
+        self._intraday_scanner = IntradayOpportunityScanner(self.market_data)
         self.operations.append_event(
             "market_data",
             "DYNAMIC_NSE_UNIVERSE_WARMED",
@@ -59,8 +56,14 @@ class ProductionAutonomousTrader(AutonomousTrader):
                 "candles": result.candles,
                 "symbols_with_history": len(self.market_data.symbols()),
                 "eligible_symbols": len(self._dynamic_ranked),
-                "shortlist": list(self._dynamic_ranked[: self.settings.universe_scan_limit]),
-                "ranking": "momentum_breakout_volume_v2",
+                "shortlist": list(
+                    self._dynamic_ranked[: self.settings.universe_scan_limit]
+                ),
+                "intraday_scan_pool": min(
+                    len(self._dynamic_ranked),
+                    self.settings.intraday_scan_pool_limit,
+                ),
+                "ranking": "momentum_breakout_volume_v2+live_intraday_v1",
             },
             now,
         )
@@ -97,11 +100,6 @@ class ProductionAutonomousTrader(AutonomousTrader):
         ]
         volatility = pstdev(daily_returns) if len(daily_returns) >= 2 else 0.0
 
-        # Liquidity is a hard eligibility gate, not the dominant rank signal.
-        # This lets genuine movers compete with mega-caps instead of simply
-        # sorting by traded rupees. Scores reward multi-horizon strength,
-        # participation/volume acceleration and trading near recent highs while
-        # mildly penalising extremely unstable names.
         return (
             0.45 * self._clamp(long_return, -0.50, 0.75)
             + 0.35 * self._clamp(short_return, -0.25, 0.35)
@@ -123,14 +121,18 @@ class ProductionAutonomousTrader(AutonomousTrader):
                 continue
             ranked.append((self._opportunity_score(history), symbol))
         ranked.sort(reverse=True)
-        return tuple(symbol for _, symbol in ranked[: self.settings.universe_scan_limit])
+        pool_limit = max(
+            self.settings.universe_scan_limit,
+            self.settings.intraday_scan_pool_limit,
+        )
+        return tuple(symbol for _, symbol in ranked[:pool_limit])
 
     def _ranked_symbols(self, now: datetime) -> tuple[str, ...]:
         if not self.settings.dynamic_universe:
             return self.settings.watchlist
         if not self._dynamic_ranked:
             self._dynamic_ranked = self._rank_dynamic_universe(now)
-        return self._dynamic_ranked
+        return self._dynamic_ranked[: self.settings.universe_scan_limit]
 
     def _active_dynamic_window(self, now: datetime) -> tuple[str, ...]:
         ranked = self._ranked_symbols(now)
@@ -138,16 +140,18 @@ class ProductionAutonomousTrader(AutonomousTrader):
             return ()
         window_size = min(self.settings.max_ai_candidates, len(ranked))
         if window_size >= len(ranked):
-            return ranked
+            selected = ranked
+            offset = 0
+        else:
+            bucket = int(now.timestamp()) // self.settings.decision_interval_seconds
+            offset = (bucket * window_size) % len(ranked)
+            end = offset + window_size
+            if end <= len(ranked):
+                selected = ranked[offset:end]
+            else:
+                selected = ranked[offset:] + ranked[: end - len(ranked)]
 
         bucket = int(now.timestamp()) // self.settings.decision_interval_seconds
-        offset = (bucket * window_size) % len(ranked)
-        end = offset + window_size
-        if end <= len(ranked):
-            selected = ranked[offset:end]
-        else:
-            selected = ranked[offset:] + ranked[: end - len(ranked)]
-
         if bucket != self._last_candidate_bucket:
             self._last_candidate_bucket = bucket
             self.operations.append_event(
@@ -164,6 +168,85 @@ class ProductionAutonomousTrader(AutonomousTrader):
             )
         return selected
 
+    @staticmethod
+    def _opportunity_payload(item: IntradayOpportunity) -> dict[str, float | str]:
+        return {
+            "symbol": item.symbol,
+            "score": round(item.score, 5),
+            "move_pct": round(item.move_pct, 5),
+            "gap_pct": round(item.gap_pct, 5),
+            "breakout_pct": round(item.breakout_pct, 5),
+            "volume_pace": round(item.volume_pace, 3),
+            "intraday_position": round(item.intraday_position, 3),
+            "acceleration_pct": round(item.acceleration_pct, 5),
+        }
+
+    def _intraday_scan_due(self, now: datetime) -> bool:
+        if not self.settings.intraday_scanner_enabled:
+            return False
+        if self._last_intraday_scan is None:
+            return True
+        return (
+            now - self._last_intraday_scan
+        ).total_seconds() >= self.settings.intraday_scan_interval_seconds
+
+    def _scan_intraday(self, api: ZerodhaApi, now: datetime) -> None:
+        if not self.settings.dynamic_universe or not self._intraday_scan_due(now):
+            return
+        if not self._dynamic_ranked:
+            self._dynamic_ranked = self._rank_dynamic_universe(now)
+        pool = self._dynamic_ranked[: self.settings.intraday_scan_pool_limit]
+        if not pool:
+            return
+
+        snapshots: dict[str, LiveMarketSnapshot] = {}
+        batch_size = self.settings.intraday_scan_batch_size
+        failed_batches = 0
+        for start in range(0, len(pool), batch_size):
+            batch = pool[start : start + batch_size]
+            try:
+                snapshots.update(api.market_snapshots(batch))
+            except Exception:
+                failed_batches += 1
+
+        self._last_intraday_scan = now
+        if not snapshots:
+            self.operations.append_event(
+                "market_data",
+                "INTRADAY_SCAN_FAILED",
+                {"pool_size": len(pool), "failed_batches": failed_batches},
+                now,
+            )
+            return
+
+        ranked = self._intraday_scanner.rank(snapshots, now)
+        qualifying = [
+            item
+            for item in ranked
+            if item.score >= self.settings.intraday_hot_score_min
+        ]
+        hot = qualifying[: self.settings.intraday_hot_candidates]
+        previous_hot = self._intraday_hot
+        self._intraday_hot = tuple(item.symbol for item in hot)
+        self._intraday_snapshots = snapshots
+
+        self.operations.append_event(
+            "market_data",
+            "INTRADAY_OPPORTUNITY_SCAN",
+            {
+                "scanned": len(snapshots),
+                "eligible_pool": len(pool),
+                "failed_batches": failed_batches,
+                "hot_symbols": list(self._intraday_hot),
+                "new_hot_symbols": [
+                    symbol for symbol in self._intraday_hot if symbol not in previous_hot
+                ],
+                "top": [self._opportunity_payload(item) for item in ranked[:12]],
+                "minimum_hot_score": self.settings.intraday_hot_score_min,
+            },
+            now,
+        )
+
     def _quotes_for_portfolio(
         self,
         api: ZerodhaApi,
@@ -172,10 +255,24 @@ class ProductionAutonomousTrader(AutonomousTrader):
         if not self.settings.dynamic_universe:
             return super()._quotes_for_portfolio(api, positions)
         now = datetime.now(IST)
+        self._scan_intraday(api, now)
         selected = self._active_dynamic_window(now)
         held = self._portfolio_symbols(positions)
-        symbols = tuple(dict.fromkeys((*held, *selected)))
-        return api.quotes(symbols)
+        symbols = tuple(dict.fromkeys((*held, *self._intraday_hot, *selected)))
+
+        result: dict[str, Quote] = {}
+        for symbol in symbols:
+            snapshot = self._intraday_snapshots.get(symbol)
+            if snapshot is not None:
+                result[symbol] = Quote(
+                    symbol=symbol,
+                    last_price=snapshot.last_price,
+                    as_of=snapshot.as_of,
+                )
+        missing = [symbol for symbol in symbols if symbol not in result]
+        if missing:
+            result.update(api.quotes(missing))
+        return result
 
     def _candidates(
         self,
@@ -190,7 +287,22 @@ class ProductionAutonomousTrader(AutonomousTrader):
         if not allow_new_buys:
             return held
         held_set = set(held)
-        selected = [
-            symbol for symbol in self._active_dynamic_window(now) if symbol not in held_set
+        promoted = [symbol for symbol in self._intraday_hot if symbol not in held_set]
+        promoted_set = set(promoted)
+        rotated = [
+            symbol
+            for symbol in self._active_dynamic_window(now)
+            if symbol not in held_set and symbol not in promoted_set
         ]
-        return held + selected
+        return held + promoted + rotated
+
+    def _decision_due(self, symbol: str, now: datetime) -> bool:
+        if symbol not in self._intraday_hot:
+            return super()._decision_due(symbol, now)
+        raw = self.state_store.load().decisions.get(symbol.upper())
+        if not raw:
+            return True
+        previous = datetime.fromisoformat(raw)
+        return (
+            now - previous
+        ).total_seconds() >= self.settings.intraday_interrupt_cooldown_seconds
