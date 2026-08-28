@@ -142,7 +142,7 @@ class RiskEngine:
                 )
 
         if quantity <= 0:
-            return RiskDecision(false=False, reason="Insufficient capital or risk budget")
+            return RiskDecision(approved=False, reason="Insufficient capital or risk budget")
         if (
             intent.side == Side.BUY
             and intent.entry_max is not None
