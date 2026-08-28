@@ -60,7 +60,7 @@ services:
     image: ai-stock-trading:local
     restart: unless-stopped
     init: true
-    command: ["python", "-m", "app.dashboard_server"]
+    command: ["python", "-m", "app.dashboard_server_v2"]
     environment:
       APP_MODE: ${APP_MODE:-paper}
       STARTING_CASH: ${STARTING_CASH:-500000}
