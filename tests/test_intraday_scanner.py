@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime, timedelta
 
 from app.config import Settings
@@ -85,6 +86,25 @@ def test_acceleration_survives_scanner_restart(tmp_path) -> None:
 
     assert ranked[0].acceleration_pct > 0.009
     assert ranked[0].acceleration_pct < 0.01
+
+
+def test_scanner_persists_entry_quality_history(tmp_path) -> None:
+    market = _history("RIPPER")
+    state_path = tmp_path / "intraday-scanner-state.json"
+    first_time = datetime(2026, 8, 20, 5, 0, tzinfo=UTC)
+    second_time = first_time + timedelta(minutes=1)
+    scanner = IntradayOpportunityScanner(market, state_path)
+
+    scanner.rank({"RIPPER": _snapshot("RIPPER", 110.0, first_time)}, first_time)
+    scanner.rank({"RIPPER": _snapshot("RIPPER", 108.0, second_time)}, second_time)
+
+    payload = json.loads(state_path.read_text(encoding="utf-8"))
+    history = payload["opportunity_history"]["RIPPER"]
+    assert len(history) == 2
+    assert history[0]["price"] == 110.0
+    assert history[1]["price"] == 108.0
+    assert "score" in history[0]
+    assert "intraday_position" in history[0]
 
 
 def test_hot_symbol_uses_short_interrupt_cooldown(tmp_path) -> None:
