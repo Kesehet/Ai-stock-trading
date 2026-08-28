@@ -61,6 +61,14 @@ jobs:
                 unmeasured_positions: .position_diagnostics.unmeasured_positions,
                 recent_realized_trades: (.position_diagnostics.recent_realized_trades[:20])
               },
+              trade_quality: {
+                positions: .trade_quality.positions,
+                measured_positions: .trade_quality.measured_positions,
+                unmeasured_positions: .trade_quality.unmeasured_positions,
+                immediate_adverse_entries: .trade_quality.immediate_adverse_entries,
+                gave_back_winners: .trade_quality.gave_back_winners,
+                by_entry_setup: .trade_quality.by_entry_setup
+              },
               runtime_state,
               diagnostics: {
                 action_counts: .diagnostics.action_counts,
