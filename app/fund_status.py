@@ -129,7 +129,11 @@ def build_fund_status(settings: Settings, now: datetime | None = None) -> dict[s
 
     nav_history = dashboard.history(limit=720)
     latest = nav_history[-1] if nav_history else None
-    today = [item for item in nav_history if item.captured_at.astimezone(IST).date() == current.date()]
+    today = [
+        item
+        for item in nav_history
+        if item.captured_at.astimezone(IST).date() == current.date()
+    ]
     day_start = today[0] if today else None
 
     audit_events = [_safe_event(item) for item in operations.recent_events(limit=300)]
