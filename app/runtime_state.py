@@ -93,3 +93,17 @@ class RuntimeStateStore:
                 last_decisions=decisions,
             )
         )
+
+    def clear_decision(self, symbol: str) -> RuntimeState:
+        """Remove a transiently failed decision so the symbol can be retried."""
+        state = self.load()
+        decisions = state.decisions
+        decisions.pop(symbol.upper(), None)
+        return self.save(
+            RuntimeState(
+                session_date=state.session_date,
+                daily_start_equity=state.daily_start_equity,
+                history_warm_date=state.history_warm_date,
+                last_decisions=decisions,
+            )
+        )
