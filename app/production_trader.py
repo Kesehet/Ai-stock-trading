@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from statistics import mean, pstdev
+from threading import Lock
 
 from app.autonomous_trader import AutonomousTrader
 from app.config import Settings
@@ -21,10 +22,14 @@ class ProductionAutonomousTrader(AutonomousTrader):
         self._nse_history = NSEHistoryLoader(self.data_dir / "nse-history")
         self._dynamic_ranked: tuple[str, ...] = ()
         self._last_candidate_bucket: int | None = None
-        self._intraday_scanner = IntradayOpportunityScanner(self.market_data)
+        self._intraday_scanner = IntradayOpportunityScanner(
+            self.market_data,
+            self.data_dir / "intraday-scanner-state.json",
+        )
         self._last_intraday_scan: datetime | None = None
         self._intraday_hot: tuple[str, ...] = ()
         self._intraday_snapshots: dict[str, LiveMarketSnapshot] = {}
+        self._intraday_state_lock = Lock()
 
     def _warm_history(self, api: ZerodhaApi, now: datetime) -> None:
         if not self.settings.dynamic_universe:
@@ -44,7 +49,10 @@ class ProductionAutonomousTrader(AutonomousTrader):
         self._history_warmed_date = today
         self.state_store.set_history_warm(now.astimezone(IST).date())
         self._dynamic_ranked = self._rank_dynamic_universe(now)
-        self._intraday_scanner = IntradayOpportunityScanner(self.market_data)
+        self._intraday_scanner = IntradayOpportunityScanner(
+            self.market_data,
+            self.data_dir / "intraday-scanner-state.json",
+        )
         self.operations.append_event(
             "market_data",
             "DYNAMIC_NSE_UNIVERSE_WARMED",
@@ -63,7 +71,7 @@ class ProductionAutonomousTrader(AutonomousTrader):
                     len(self._dynamic_ranked),
                     self.settings.intraday_scan_pool_limit,
                 ),
-                "ranking": "momentum_breakout_volume_v2+live_intraday_v1",
+                "ranking": "momentum_breakout_volume_v2+live_intraday_v2",
             },
             now,
         )
@@ -228,9 +236,11 @@ class ProductionAutonomousTrader(AutonomousTrader):
             if item.score >= self.settings.intraday_hot_score_min
         ]
         hot = qualifying[: self.settings.intraday_hot_candidates]
-        previous_hot = self._intraday_hot
-        self._intraday_hot = tuple(item.symbol for item in hot)
-        self._intraday_snapshots = snapshots
+        with self._intraday_state_lock:
+            previous_hot = self._intraday_hot
+            self._intraday_hot = tuple(item.symbol for item in hot)
+            self._intraday_snapshots = snapshots
+            current_hot = self._intraday_hot
 
         self.operations.append_event(
             "market_data",
@@ -239,15 +249,30 @@ class ProductionAutonomousTrader(AutonomousTrader):
                 "scanned": len(snapshots),
                 "eligible_pool": len(pool),
                 "failed_batches": failed_batches,
-                "hot_symbols": list(self._intraday_hot),
+                "hot_symbols": list(current_hot),
                 "new_hot_symbols": [
-                    symbol for symbol in self._intraday_hot if symbol not in previous_hot
+                    symbol for symbol in current_hot if symbol not in previous_hot
                 ],
                 "top": [self._opportunity_payload(item) for item in ranked[:12]],
                 "minimum_hot_score": self.settings.intraday_hot_score_min,
             },
             now,
         )
+
+    def intraday_radar_tick(self, now: datetime | None = None) -> None:
+        """Run broad live scanning independently from slow multi-agent research."""
+        current = now or datetime.now(IST)
+        if current.tzinfo is None:
+            raise ValueError("radar tick time must be timezone-aware")
+        if not self.settings.dynamic_universe or not self._intraday_scan_due(current):
+            return
+        today = current.astimezone(IST).date().isoformat()
+        if self._history_warmed_date != today:
+            return
+        api = self._api()
+        if api is None:
+            return
+        self._scan_intraday(api, current)
 
     def _quotes_for_portfolio(
         self,
@@ -257,14 +282,16 @@ class ProductionAutonomousTrader(AutonomousTrader):
         if not self.settings.dynamic_universe:
             return super()._quotes_for_portfolio(api, positions)
         now = datetime.now(IST)
-        self._scan_intraday(api, now)
         selected = self._active_dynamic_window(now)
         held = self._portfolio_symbols(positions)
-        symbols = tuple(dict.fromkeys((*held, *self._intraday_hot, *selected)))
+        with self._intraday_state_lock:
+            hot = self._intraday_hot
+            snapshots = dict(self._intraday_snapshots)
+        symbols = tuple(dict.fromkeys((*held, *hot, *selected)))
 
         result: dict[str, Quote] = {}
         for symbol in symbols:
-            snapshot = self._intraday_snapshots.get(symbol)
+            snapshot = snapshots.get(symbol)
             if snapshot is not None:
                 result[symbol] = Quote(
                     symbol=symbol,
@@ -289,7 +316,9 @@ class ProductionAutonomousTrader(AutonomousTrader):
         if not allow_new_buys:
             return held
         held_set = set(held)
-        promoted = [symbol for symbol in self._intraday_hot if symbol not in held_set]
+        with self._intraday_state_lock:
+            hot = self._intraday_hot
+        promoted = [symbol for symbol in hot if symbol not in held_set]
         promoted_set = set(promoted)
         rotated = [
             symbol
@@ -299,7 +328,9 @@ class ProductionAutonomousTrader(AutonomousTrader):
         return held + promoted + rotated
 
     def _decision_due(self, symbol: str, now: datetime) -> bool:
-        if symbol not in self._intraday_hot:
+        with self._intraday_state_lock:
+            is_hot = symbol in self._intraday_hot
+        if not is_hot:
             return super()._decision_due(symbol, now)
         raw = self.state_store.load().decisions.get(symbol.upper())
         if not raw:
