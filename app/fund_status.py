@@ -119,6 +119,28 @@ def _event_diagnostics(events: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _dashboard_config(settings: Settings) -> dict[str, Any]:
+    return {
+        "dynamic_universe": settings.dynamic_universe,
+        "decision_interval_seconds": settings.decision_interval_seconds,
+        "quote_poll_seconds": settings.quote_poll_seconds,
+        "max_ai_candidates": settings.max_ai_candidates,
+        "max_position_pct": settings.max_position_pct,
+        "max_daily_loss_pct": settings.max_daily_loss_pct,
+        "max_open_positions": settings.max_open_positions,
+        "min_buy_confidence": settings.min_buy_confidence,
+        "paper_slippage_bps": settings.paper_slippage_bps,
+        "universe_scan_limit": settings.universe_scan_limit,
+        "intraday_scanner_enabled": settings.intraday_scanner_enabled,
+        "intraday_scan_interval_seconds": settings.intraday_scan_interval_seconds,
+        "intraday_scan_pool_limit": settings.intraday_scan_pool_limit,
+        "intraday_scan_batch_size": settings.intraday_scan_batch_size,
+        "intraday_hot_candidates": settings.intraday_hot_candidates,
+        "intraday_hot_score_min": settings.intraday_hot_score_min,
+        "intraday_interrupt_cooldown_seconds": settings.intraday_interrupt_cooldown_seconds,
+    }
+
+
 def build_fund_status(settings: Settings, now: datetime | None = None) -> dict[str, Any]:
     current = (now or datetime.now(IST)).astimezone(IST)
     data_dir = Path(settings.data_dir)
@@ -181,8 +203,13 @@ def build_fund_status(settings: Settings, now: datetime | None = None) -> dict[s
         item for item in audit_events if item["action"] == "INTRADAY_OPPORTUNITY_SCAN"
     ]
 
+    effective_config = _read_json(data_dir / "effective-config.json")
+    active_configuration = (
+        effective_config if isinstance(effective_config, dict) else _dashboard_config(settings)
+    )
+
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "generated_at": current.isoformat(),
         "mode": mode.value,
         "market_phase": nse_capital_market_calendar(current).phase_at(current).value,
@@ -212,6 +239,7 @@ def build_fund_status(settings: Settings, now: datetime | None = None) -> dict[s
         "paper_broker": paper,
         "nav_history": nav_payload,
         "runtime_state": _read_json(data_dir / "runtime-state.json"),
+        "scanner_state": _read_json(data_dir / "intraday-scanner-state.json"),
         "diagnostics": {
             **_event_diagnostics(audit_events),
             "recent_decisions": decisions[:40],
@@ -225,22 +253,5 @@ def build_fund_status(settings: Settings, now: datetime | None = None) -> dict[s
                 data_dir / "trader-diagnostics.log.1", 120
             ),
         },
-        "active_configuration": {
-            "dynamic_universe": settings.dynamic_universe,
-            "decision_interval_seconds": settings.decision_interval_seconds,
-            "quote_poll_seconds": settings.quote_poll_seconds,
-            "max_ai_candidates": settings.max_ai_candidates,
-            "max_position_pct": settings.max_position_pct,
-            "max_daily_loss_pct": settings.max_daily_loss_pct,
-            "max_open_positions": settings.max_open_positions,
-            "min_buy_confidence": settings.min_buy_confidence,
-            "paper_slippage_bps": settings.paper_slippage_bps,
-            "universe_scan_limit": settings.universe_scan_limit,
-            "intraday_scanner_enabled": settings.intraday_scanner_enabled,
-            "intraday_scan_interval_seconds": settings.intraday_scan_interval_seconds,
-            "intraday_scan_pool_limit": settings.intraday_scan_pool_limit,
-            "intraday_hot_candidates": settings.intraday_hot_candidates,
-            "intraday_hot_score_min": settings.intraday_hot_score_min,
-            "intraday_interrupt_cooldown_seconds": settings.intraday_interrupt_cooldown_seconds,
-        },
+        "active_configuration": active_configuration,
     }
