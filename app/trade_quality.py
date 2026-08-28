@@ -13,6 +13,15 @@ def _as_datetime(value: object) -> datetime | None:
         return None
 
 
+def _as_float(value: object) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _setup_tag(point: dict[str, Any] | None) -> str:
     if point is None:
         return "unknown"
@@ -151,11 +160,8 @@ def build_trade_quality(
         entry_point = _nearest_entry_point(points, entry_at)
         prices: list[float] = []
         for point in post_entry:
-            try:
-                price = float(point.get("price") or 0.0)
-            except (TypeError, ValueError):
-                continue
-            if price > 0:
+            price = _as_float(point.get("price"))
+            if price is not None and price > 0:
                 prices.append(price)
 
         current_price = prices[-1] if prices else None
@@ -174,6 +180,18 @@ def build_trade_quality(
             else None
         )
 
+        entry_score = _as_float(entry_point.get("score")) if entry_point else None
+        entry_move = _as_float(entry_point.get("move_pct")) if entry_point else None
+        entry_breakout = (
+            _as_float(entry_point.get("breakout_pct")) if entry_point else None
+        )
+        entry_position = (
+            _as_float(entry_point.get("intraday_position")) if entry_point else None
+        )
+        entry_volume = (
+            _as_float(entry_point.get("volume_pace")) if entry_point else None
+        )
+
         rows.append(
             {
                 "symbol": symbol,
@@ -183,25 +201,20 @@ def build_trade_quality(
                 "tracking_from": entry_at.isoformat() if entry_at is not None else None,
                 "observations": len(prices),
                 "entry_setup": _setup_tag(entry_point),
-                "entry_score": round(float(entry_point.get("score")), 5)
-                if entry_point is not None and entry_point.get("score") is not None
+                "entry_score": round(entry_score, 5)
+                if entry_score is not None
                 else None,
-                "entry_move_pct": round(float(entry_point.get("move_pct")) * 100, 4)
-                if entry_point is not None and entry_point.get("move_pct") is not None
+                "entry_move_pct": round(entry_move * 100, 4)
+                if entry_move is not None
                 else None,
-                "entry_breakout_pct": round(
-                    float(entry_point.get("breakout_pct")) * 100, 4
-                )
-                if entry_point is not None and entry_point.get("breakout_pct") is not None
+                "entry_breakout_pct": round(entry_breakout * 100, 4)
+                if entry_breakout is not None
                 else None,
-                "entry_intraday_position": round(
-                    float(entry_point.get("intraday_position")), 4
-                )
-                if entry_point is not None
-                and entry_point.get("intraday_position") is not None
+                "entry_intraday_position": round(entry_position, 4)
+                if entry_position is not None
                 else None,
-                "entry_volume_pace": round(float(entry_point.get("volume_pace")), 3)
-                if entry_point is not None and entry_point.get("volume_pace") is not None
+                "entry_volume_pace": round(entry_volume, 3)
+                if entry_volume is not None
                 else None,
                 "current_return_pct": round(current_return * 100, 4)
                 if current_return is not None
