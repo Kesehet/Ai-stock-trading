@@ -174,6 +174,10 @@ class ResearchContextBuilder:
                 cash=self.portfolio.get_cash(),
                 market_data=self.market_data,
                 as_of=as_of,
+                live_prices={
+                    quote_symbol: quote.last_price
+                    for quote_symbol, quote in self.live_quotes.items()
+                },
             ).as_text()
         return ResearchSnapshot(
             symbol=normalized_symbol,
@@ -287,6 +291,18 @@ class FundManagerAgent:
                     "HOLD is valid but is NOT the default. Choose HOLD only when "
                     "expected edge is non-positive, reports materially conflict, "
                     "the setup is overextended, or downside is not worth the opportunity."
+                ),
+                (
+                    "The portfolio report includes live mark, average cost and unrealized "
+                    "P&L when a position is held. Use those economics explicitly. Do not "
+                    "treat a held position as a fresh stock pick."
+                ),
+                (
+                    "For an existing holding, avoid unnecessary BUY/HOLD/SELL oscillation. "
+                    "A reversal should be supported by material thesis deterioration, a "
+                    "clear change in expected reward versus risk, or a stronger contrary "
+                    "signal than ordinary short-term noise. Deterministic stops and targets "
+                    "remain the hard loss/profit controls."
                 ),
                 (
                     "Missing fundamental/news/macro data should reduce confidence "
