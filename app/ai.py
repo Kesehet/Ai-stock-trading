@@ -127,8 +127,6 @@ class OllamaClient:
                 return float(raw)
             except ValueError:
                 pass
-        # A full minute is deliberately conservative: one 429 represents provider
-        # backpressure for the entire research team, not a failure of one symbol.
         return 60.0
 
     def generate_structured(self, prompt: str, response_model: type[T]) -> T:
@@ -138,9 +136,6 @@ class OllamaClient:
 
         with httpx.Client(timeout=self.timeout_seconds) as client:
             for attempt in range(1, self.structured_retries + 1):
-                # Strict schema mode is preferred. If a model/gateway struggles with
-                # schema-constrained generation, later attempts request generic JSON
-                # while we continue enforcing the exact Pydantic schema locally.
                 strict_schema = attempt == 1
                 format_value: object = schema if strict_schema else "json"
                 retry_prompt = prompt
@@ -171,7 +166,10 @@ class OllamaClient:
                     json=payload,
                     headers={"Authorization": f"Bearer {self.api_key}"},
                 )
-                if response.status_code == 429:
+                # Some unit-test response doubles intentionally implement only the
+                # response methods consumed by the legacy structured-output path.
+                # Treat an absent status_code as a normal non-429 response.
+                if getattr(response, "status_code", 200) == 429:
                     raise OllamaRateLimitError(self._retry_after_seconds(response))
                 response.raise_for_status()
 
