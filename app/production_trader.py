@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from statistics import mean
+from statistics import mean, pstdev
 
 from app.autonomous_trader import AutonomousTrader
 from app.config import Settings
@@ -27,6 +27,7 @@ class ProductionAutonomousTrader(AutonomousTrader):
         super().__init__(settings)
         self._nse_history = NSEHistoryLoader(self.data_dir / "nse-history")
         self._dynamic_ranked: tuple[str, ...] = ()
+        self._last_candidate_bucket: int | None = None
 
     def _warm_history(self, api: ZerodhaApi, now: datetime) -> None:
         if not self.settings.dynamic_universe:
@@ -58,8 +59,57 @@ class ProductionAutonomousTrader(AutonomousTrader):
                 "symbols_with_history": len(self.market_data.symbols()),
                 "eligible_symbols": len(self._dynamic_ranked),
                 "shortlist": list(self._dynamic_ranked[: self.settings.universe_scan_limit]),
+                "ranking": "momentum_breakout_volume_v2",
             },
             now,
+        )
+
+    @staticmethod
+    def _clamp(value: float, lower: float, upper: float) -> float:
+        return max(lower, min(upper, value))
+
+    def _opportunity_score(self, history: list[object]) -> float:
+        # ``history`` is a Candle list at runtime. Keeping this helper local to the
+        # scanner avoids coupling the production selector to a second model type.
+        candles = history
+        if len(candles) < 2:
+            return float("-inf")
+
+        first = candles[0]
+        last = candles[-1]
+        long_return = (last.close / first.close) - 1 if first.close > 0 else 0.0
+
+        short_anchor = candles[-6] if len(candles) >= 6 else first
+        short_return = (
+            (last.close / short_anchor.close) - 1 if short_anchor.close > 0 else 0.0
+        )
+
+        high = max(candle.high for candle in candles)
+        near_high = (last.close / high) if high > 0 else 0.0
+
+        avg_volume = mean(candle.volume for candle in candles) or 1.0
+        recent = candles[-5:] if len(candles) >= 5 else candles
+        recent_volume = mean(candle.volume for candle in recent)
+        volume_ratio = recent_volume / avg_volume
+
+        daily_returns = [
+            (candles[index].close / candles[index - 1].close) - 1
+            for index in range(1, len(candles))
+            if candles[index - 1].close > 0
+        ]
+        volatility = pstdev(daily_returns) if len(daily_returns) >= 2 else 0.0
+
+        # Liquidity is a hard eligibility gate, not the dominant rank signal.
+        # This lets genuine movers compete with mega-caps instead of simply
+        # sorting by traded rupees. Scores reward multi-horizon strength,
+        # participation/volume acceleration and trading near recent highs while
+        # mildly penalising extremely unstable names.
+        return (
+            0.45 * self._clamp(long_return, -0.50, 0.75)
+            + 0.35 * self._clamp(short_return, -0.25, 0.35)
+            + 0.12 * self._clamp(volume_ratio - 1.0, -0.75, 2.0)
+            + 0.08 * self._clamp(near_high - 0.90, -0.30, 0.10)
+            - 0.10 * max(0.0, volatility - 0.05)
         )
 
     def _rank_dynamic_universe(self, now: datetime) -> tuple[str, ...]:
@@ -73,12 +123,7 @@ class ProductionAutonomousTrader(AutonomousTrader):
             avg_traded_value = mean(candle.close * candle.volume for candle in history)
             if avg_traded_value < self.settings.universe_min_avg_traded_value:
                 continue
-            first = history[0].close
-            last = history[-1]
-            momentum = (last.close / first) - 1 if first > 0 else 0.0
-            bounded_momentum = max(-0.5, min(0.5, momentum))
-            score = avg_traded_value * (1.0 + bounded_momentum)
-            ranked.append((score, symbol))
+            ranked.append((self._opportunity_score(history), symbol))
         ranked.sort(reverse=True)
         return tuple(symbol for _, symbol in ranked[: self.settings.universe_scan_limit])
 
@@ -89,6 +134,38 @@ class ProductionAutonomousTrader(AutonomousTrader):
             self._dynamic_ranked = self._rank_dynamic_universe(now)
         return self._dynamic_ranked
 
+    def _active_dynamic_window(self, now: datetime) -> tuple[str, ...]:
+        ranked = self._ranked_symbols(now)
+        if not ranked:
+            return ()
+        window_size = min(self.settings.max_ai_candidates, len(ranked))
+        if window_size >= len(ranked):
+            return ranked
+
+        bucket = int(now.timestamp()) // self.settings.decision_interval_seconds
+        offset = (bucket * window_size) % len(ranked)
+        end = offset + window_size
+        if end <= len(ranked):
+            selected = ranked[offset:end]
+        else:
+            selected = ranked[offset:] + ranked[: end - len(ranked)]
+
+        if bucket != self._last_candidate_bucket:
+            self._last_candidate_bucket = bucket
+            self.operations.append_event(
+                "research",
+                "CANDIDATES_SELECTED",
+                {
+                    "symbols": list(selected),
+                    "pool_size": len(ranked),
+                    "window_size": window_size,
+                    "rotation_offset": offset,
+                    "ranking": "momentum_breakout_volume_v2",
+                },
+                now,
+            )
+        return selected
+
     def _quotes_for_portfolio(
         self,
         api: ZerodhaApi,
@@ -96,11 +173,10 @@ class ProductionAutonomousTrader(AutonomousTrader):
     ) -> dict[str, Quote]:
         if not self.settings.dynamic_universe:
             return super()._quotes_for_portfolio(api, positions)
-        ranked = self._ranked_symbols(datetime.now(IST))
+        now = datetime.now(IST)
+        selected = self._active_dynamic_window(now)
         held = self._portfolio_symbols(positions)
-        symbols = tuple(
-            dict.fromkeys((*held, *ranked[: self.settings.max_ai_candidates]))
-        )
+        symbols = tuple(dict.fromkeys((*held, *selected)))
         return api.quotes(symbols)
 
     def _candidates(
@@ -116,5 +192,7 @@ class ProductionAutonomousTrader(AutonomousTrader):
         if not allow_new_buys:
             return held
         held_set = set(held)
-        ranked = [symbol for symbol in self._ranked_symbols(now) if symbol not in held_set]
-        return held + ranked[: self.settings.max_ai_candidates]
+        selected = [
+            symbol for symbol in self._active_dynamic_window(now) if symbol not in held_set
+        ]
+        return held + selected
