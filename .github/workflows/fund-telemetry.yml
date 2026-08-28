@@ -51,6 +51,16 @@ jobs:
                 realized_pnl: .paper_broker.realized_pnl,
                 charges: .paper_broker.charges
               },
+              position_diagnostics: {
+                mark_updated_at: .position_diagnostics.mark_updated_at,
+                positions: .position_diagnostics.positions,
+                material_unrealized_losers: .position_diagnostics.material_unrealized_losers,
+                unrealized_winners: .position_diagnostics.unrealized_winners,
+                unrealized_pnl_total: .position_diagnostics.unrealized_pnl_total,
+                measured_positions: .position_diagnostics.measured_positions,
+                unmeasured_positions: .position_diagnostics.unmeasured_positions,
+                recent_realized_trades: (.position_diagnostics.recent_realized_trades[:20])
+              },
               runtime_state,
               diagnostics: {
                 action_counts: .diagnostics.action_counts,
