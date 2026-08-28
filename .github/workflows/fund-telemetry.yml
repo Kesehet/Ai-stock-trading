@@ -7,6 +7,9 @@ on:
     - cron: "30 7 * * 1-5"
     - cron: "15 10 * * 1-5"
   workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/fund-telemetry.yml"
 
 permissions:
   contents: read
