@@ -140,10 +140,14 @@ class IntradayOpportunityScanner:
         if previous_price is not None and previous_price > 0:
             acceleration = (snapshot.last_price / previous_price) - 1.0
 
-        # The scanner rewards several distinct ways a stock can become interesting
-        # right now: a large move, abnormal participation, a fresh breakout,
-        # holding near the intraday high, or accelerating between scans. Gap-only
-        # names get little credit unless buyers keep following through.
+        # Reward genuine participation and momentum, but distinguish an interesting
+        # stock from an attractive entry. Very extended breakouts near the session
+        # high are still visible to research, just ranked below fresher setups.
+        extension_penalty = (
+            0.10 * self._clamp((move - 0.10) / 0.10, 0.0, 1.0)
+            + 0.06 * self._clamp((breakout - 0.06) / 0.08, 0.0, 1.0)
+            + 0.04 * self._clamp((intraday_position - 0.90) / 0.10, 0.0, 1.0)
+        )
         score = (
             0.34 * self._clamp(move, -0.08, 0.12)
             + 0.16 * self._clamp(gap, -0.06, 0.08)
@@ -151,6 +155,7 @@ class IntradayOpportunityScanner:
             + 0.16 * self._clamp(volume_pace - 1.0, -1.0, 4.0) / 4.0
             + 0.08 * self._clamp(intraday_position - 0.5, -0.5, 0.5)
             + 0.24 * self._clamp(acceleration, -0.03, 0.04)
+            - extension_penalty
         )
 
         return IntradayOpportunity(
