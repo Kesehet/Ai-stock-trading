@@ -37,7 +37,11 @@ def _setup_tag(point: dict[str, Any] | None) -> str:
     return "neutral"
 
 
-def _current_cycle_start(orders: list[dict[str, Any]], symbol: str, product: str) -> datetime | None:
+def _current_cycle_start(
+    orders: list[dict[str, Any]],
+    symbol: str,
+    product: str,
+) -> datetime | None:
     relevant = [
         item
         for item in orders
@@ -235,7 +239,12 @@ def build_trade_quality(
         setup = str(row.get("entry_setup") or "unknown")
         bucket = by_setup.setdefault(
             setup,
-            {"count": 0, "avg_current_return_pct": 0.0, "avg_mfe_pct": 0.0, "avg_mae_pct": 0.0},
+            {
+                "count": 0,
+                "avg_current_return_pct": 0.0,
+                "avg_mfe_pct": 0.0,
+                "avg_mae_pct": 0.0,
+            },
         )
         count = int(bucket["count"])
         current = float(row.get("current_return_pct") or 0.0)
