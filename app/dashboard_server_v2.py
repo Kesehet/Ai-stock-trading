@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import html
+import json
 from http.server import ThreadingHTTPServer
 from urllib.parse import urlparse
 
@@ -12,8 +13,19 @@ from app.dashboard_server import (
     _admin_tools,
     _write_html,
 )
+from app.fund_status import build_fund_status
 from app.scheduler import IST
 from app.zerodha_session import ZerodhaSession
+
+
+def _write_json(handler: DashboardServerHandler, status: int, payload: object) -> None:
+    body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    handler.send_response(status)
+    handler.send_header("Content-Type", "application/json; charset=utf-8")
+    handler.send_header("Cache-Control", "no-store")
+    handler.send_header("Content-Length", str(len(body)))
+    handler.end_headers()
+    handler.wfile.write(body)
 
 
 def _zerodha_status_card(
@@ -84,7 +96,11 @@ class DashboardServerV2Handler(DashboardServerHandler):
         )
 
     def do_GET(self) -> None:  # noqa: N802
-        if urlparse(self.path).path != "/":
+        path = urlparse(self.path).path
+        if path == "/fund-status.json":
+            _write_json(self, 200, build_fund_status(self.settings))
+            return
+        if path != "/":
             super().do_GET()
             return
 
