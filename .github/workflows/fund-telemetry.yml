@@ -1,0 +1,40 @@
+name: Fund Telemetry
+
+on:
+  schedule:
+    # IST has no DST: 09:00, 13:00, 15:45 IST on weekdays.
+    - cron: "30 3 * * 1-5"
+    - cron: "30 7 * * 1-5"
+    - cron: "15 10 * * 1-5"
+  workflow_dispatch:
+  push:
+    paths:
+      - "app/fund_status.py"
+      - "app/dashboard_server_v2.py"
+      - ".github/workflows/fund-telemetry.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Fetch fund telemetry
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL="https://ai-stock-trading.srv1058562.hstgr.cloud/fund-status.json"
+          curl --fail --silent --show-error --max-time 15 --retry 1 "$URL" -o fund-status.json
+          jq -e . fund-status.json >/dev/null
+          echo "FUND_TELEMETRY_JSON_BEGIN"
+          jq -c . fund-status.json
+          echo "FUND_TELEMETRY_JSON_END"
+          {
+            echo "### Fund telemetry"
+            echo
+            echo '```json'
+            jq '{generated_at,mode,market_phase,worker,portfolio,counts_in_recent_window,activity:{latest_intraday_scan:.activity.latest_intraday_scan,recent_orders:.activity.recent_orders,recent_errors:.activity.recent_errors}}' fund-status.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
