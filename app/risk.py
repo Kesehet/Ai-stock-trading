@@ -59,6 +59,18 @@ class RiskEngine:
             return RiskDecision(approved=False, reason="Daily loss limit reached")
         if intent.side == Side.BUY and intent.confidence < self.limits.min_buy_confidence:
             return RiskDecision(approved=False, reason="AI confidence is below buy threshold")
+        if (
+            intent.side == Side.BUY
+            and intent.entry_max is not None
+            and quote.last_price > intent.entry_max
+        ):
+            return RiskDecision(approved=False, reason="Price exceeds allowed entry range")
+        if (
+            intent.side == Side.BUY
+            and intent.entry_min is not None
+            and quote.last_price < intent.entry_min
+        ):
+            return RiskDecision(approved=False, reason="Price is below allowed entry range")
 
         if intent.side == Side.BUY and intent.stop_price is not None:
             if intent.stop_price >= quote.last_price:
@@ -143,18 +155,6 @@ class RiskEngine:
 
         if quantity <= 0:
             return RiskDecision(approved=False, reason="Insufficient capital or risk budget")
-        if (
-            intent.side == Side.BUY
-            and intent.entry_max is not None
-            and quote.last_price > intent.entry_max
-        ):
-            return RiskDecision(approved=False, reason="Price exceeds allowed entry range")
-        if (
-            intent.side == Side.BUY
-            and intent.entry_min is not None
-            and quote.last_price < intent.entry_min
-        ):
-            return RiskDecision(approved=False, reason="Price is below allowed entry range")
 
         plan = OrderPlan(
             intent_id=f"{intent.thesis_id}:{int(intent.decision_at.timestamp())}",
