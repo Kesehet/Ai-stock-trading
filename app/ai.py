@@ -13,6 +13,17 @@ from app.ollama_credentials import OllamaCredentialStore
 T = TypeVar("T", bound=BaseModel)
 
 
+class OllamaRateLimitError(RuntimeError):
+    """Ollama Cloud asked the fund to slow down globally."""
+
+    def __init__(self, retry_after_seconds: float = 60.0) -> None:
+        self.retry_after_seconds = max(10.0, min(float(retry_after_seconds), 300.0))
+        super().__init__(
+            f"Ollama Cloud rate limited research; retry after "
+            f"{self.retry_after_seconds:.0f}s"
+        )
+
+
 class OllamaClient:
     """Remote Ollama cloud client that requires schema-valid JSON output."""
 
@@ -108,6 +119,18 @@ class OllamaClient:
         text = str(exc).replace("\n", " ").strip()
         return text[:500] or type(exc).__name__
 
+    @staticmethod
+    def _retry_after_seconds(response: httpx.Response) -> float:
+        raw = response.headers.get("Retry-After", "").strip()
+        if raw:
+            try:
+                return float(raw)
+            except ValueError:
+                pass
+        # A full minute is deliberately conservative: one 429 represents provider
+        # backpressure for the entire research team, not a failure of one symbol.
+        return 60.0
+
     def generate_structured(self, prompt: str, response_model: type[T]) -> T:
         schema = response_model.model_json_schema()
         schema_json = json.dumps(schema, separators=(",", ":"))
@@ -148,6 +171,8 @@ class OllamaClient:
                     json=payload,
                     headers={"Authorization": f"Bearer {self.api_key}"},
                 )
+                if response.status_code == 429:
+                    raise OllamaRateLimitError(self._retry_after_seconds(response))
                 response.raise_for_status()
 
                 try:
