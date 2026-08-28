@@ -1,5 +1,7 @@
 from datetime import UTC, datetime
 
+import pytest
+
 from app.fund_status import _position_diagnostics
 from app.market_data import HistoricalDataStore
 from app.models import Position, Product
@@ -27,7 +29,7 @@ def test_portfolio_context_uses_live_mark_and_cost_basis() -> None:
     assert context.average_cost == 100.0
     assert context.mark_price == 95.0
     assert context.unrealized_pnl == -50.0
-    assert context.unrealized_pnl_pct == -0.05
+    assert context.unrealized_pnl_pct == pytest.approx(-0.05)
     assert round(context.position_weight, 6) == round(950.0 / 9950.0, 6)
 
 
