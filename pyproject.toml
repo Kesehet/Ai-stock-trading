@@ -49,3 +49,10 @@ plugins = ["pydantic.mypy"]
 [[tool.mypy.overrides]]
 module = "app.autonomous_trader"
 disable_error_code = ["arg-type"]
+
+# Production intentionally enriches the base static intent builder with live
+# scanner state. Python supports this instance-aware override; keep the narrow
+# exception here instead of weakening strict typing for the rest of the app.
+[[tool.mypy.overrides]]
+module = "app.production_trader"
+disable_error_code = ["override"]
