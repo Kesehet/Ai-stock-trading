@@ -40,7 +40,8 @@ def _read_json(path: Path) -> object | None:
     if not path.exists():
         return None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        parsed: object = json.loads(path.read_text(encoding="utf-8"))
+        return parsed
     except (OSError, json.JSONDecodeError):
         return None
 
