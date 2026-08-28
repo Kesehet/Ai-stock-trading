@@ -7,7 +7,7 @@ on:
     - cron: "30 7 * * 1-5"
     - cron: "15 10 * * 1-5"
   workflow_dispatch:
-  # Temporary verification trigger. Diagnostic refresh: 2026-08-28.
+  # Temporary verification trigger. Diagnostic refresh: 2026-08-28 16:11 IST.
   push:
     paths:
       - ".github/workflows/fund-telemetry.yml"
