@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import signal
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from threading import Event, Thread
 from time import time
@@ -36,16 +37,37 @@ def _heartbeat_worker(path: Path, stop: Event, interval_seconds: float = 5.0) ->
         stop.wait(interval_seconds)
 
 
-def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+def _configure_logging(data_dir: Path) -> None:
+    formatter = logging.Formatter(
+        "%(asctime)s %(levelname)s %(name)s %(message)s"
     )
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    if not root.handlers:
+        stream = logging.StreamHandler()
+        stream.setFormatter(formatter)
+        root.addHandler(stream)
+
+    diagnostic_path = data_dir / "trader-diagnostics.log"
+    rotating = RotatingFileHandler(
+        diagnostic_path,
+        maxBytes=2_000_000,
+        backupCount=2,
+        encoding="utf-8",
+    )
+    rotating.setLevel(logging.INFO)
+    rotating.setFormatter(formatter)
+    root.addHandler(rotating)
+
+
+def main() -> None:
     settings = Settings()
     heartbeat = Path(settings.heartbeat_path)
     heartbeat.parent.mkdir(parents=True, exist_ok=True)
     data_dir = Path(settings.data_dir)
     data_dir.mkdir(parents=True, exist_ok=True)
+    _configure_logging(data_dir)
+
     operations = OperationsStore(data_dir / "operations.sqlite3")
     calendar = nse_capital_market_calendar()
     trader = ProductionAutonomousTrader(settings)
