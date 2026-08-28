@@ -1,10 +1,11 @@
+# ruff: noqa: E501
 from __future__ import annotations
 
 import html
-from datetime import datetime
 from http.server import ThreadingHTTPServer
 from urllib.parse import urlparse
 
+from app.config import Settings
 from app.dashboard import render_dashboard
 from app.dashboard_server import (
     DashboardServerHandler,
@@ -101,7 +102,7 @@ class DashboardServerV2Handler(DashboardServerHandler):
 
 
 def main() -> None:
-    settings = DashboardServerV2Handler.settings.__class__()
+    settings = Settings()
     DashboardServerV2Handler.settings = settings
     ThreadingHTTPServer(
         (settings.dashboard_bind_host, settings.dashboard_port),
