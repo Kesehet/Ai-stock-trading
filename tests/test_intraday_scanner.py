@@ -26,6 +26,19 @@ def _history(symbol: str, base_price: float = 100.0) -> HistoricalDataStore:
     return store
 
 
+def _snapshot(symbol: str, price: float, now: datetime) -> LiveMarketSnapshot:
+    return LiveMarketSnapshot(
+        symbol=symbol,
+        last_price=price,
+        open_price=104.0,
+        high_price=max(113.0, price),
+        low_price=103.0,
+        previous_close=103.8,
+        volume=1_500_000,
+        as_of=now,
+    )
+
+
 def test_live_mover_with_volume_outranks_flat_stock() -> None:
     now = datetime(2026, 8, 20, 5, 0, tzinfo=UTC)
     market = _history("RIPPER")
@@ -34,16 +47,7 @@ def test_live_mover_with_volume_outranks_flat_stock() -> None:
     scanner = IntradayOpportunityScanner(market)
 
     snapshots = {
-        "RIPPER": LiveMarketSnapshot(
-            symbol="RIPPER",
-            last_price=112.0,
-            open_price=104.0,
-            high_price=113.0,
-            low_price=103.0,
-            previous_close=103.8,
-            volume=1_500_000,
-            as_of=now,
-        ),
+        "RIPPER": _snapshot("RIPPER", 112.0, now),
         "FLAT": LiveMarketSnapshot(
             symbol="FLAT",
             last_price=104.0,
@@ -62,6 +66,25 @@ def test_live_mover_with_volume_outranks_flat_stock() -> None:
     assert ranked[0].score > ranked[1].score
     assert ranked[0].move_pct > 0.07
     assert ranked[0].volume_pace > 1.0
+
+
+def test_acceleration_survives_scanner_restart(tmp_path) -> None:
+    market = _history("RIPPER")
+    state_path = tmp_path / "intraday-scanner-state.json"
+    first_time = datetime(2026, 8, 20, 5, 0, tzinfo=UTC)
+    second_time = first_time + timedelta(minutes=1)
+
+    first = IntradayOpportunityScanner(market, state_path)
+    first.rank({"RIPPER": _snapshot("RIPPER", 110.0, first_time)}, first_time)
+
+    restarted = IntradayOpportunityScanner(market, state_path)
+    ranked = restarted.rank(
+        {"RIPPER": _snapshot("RIPPER", 111.0, second_time)},
+        second_time,
+    )
+
+    assert ranked[0].acceleration_pct > 0.009
+    assert ranked[0].acceleration_pct < 0.01
 
 
 def test_hot_symbol_uses_short_interrupt_cooldown(tmp_path) -> None:
