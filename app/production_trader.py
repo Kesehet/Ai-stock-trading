@@ -33,6 +33,8 @@ class ProductionAutonomousTrader(AutonomousTrader):
         self._intraday_hot: tuple[str, ...] = ()
         self._intraday_snapshots: dict[str, LiveMarketSnapshot] = {}
         self._intraday_state_lock = Lock()
+        self._ai_cooldown_until: datetime | None = None
+        self._ai_cooldown_announced_until: datetime | None = None
 
     def _warm_history(self, api: ZerodhaApi, now: datetime) -> None:
         if not self.settings.dynamic_universe:
@@ -328,7 +330,9 @@ class ProductionAutonomousTrader(AutonomousTrader):
             for symbol in self._active_dynamic_window(now)
             if symbol not in held_set and symbol not in promoted_set
         ]
-        return held + promoted + rotated
+        # Deterministic stops/targets already protect held positions every tick.
+        # During normal operation, freshly-hot opportunities get AI time first.
+        return promoted + held + rotated
 
     def _decision_due(self, symbol: str, now: datetime) -> bool:
         with self._intraday_state_lock:
@@ -342,6 +346,49 @@ class ProductionAutonomousTrader(AutonomousTrader):
         return (
             now - previous
         ).total_seconds() >= self.settings.intraday_interrupt_cooldown_seconds
+
+    def _ai_cooldown_active(self, now: datetime) -> bool:
+        until = self._ai_cooldown_until
+        if until is None or now >= until:
+            if until is not None:
+                self.operations.append_event(
+                    "ai",
+                    "AI_COOLDOWN_CLEARED",
+                    {"cleared_at": now.isoformat()},
+                    now,
+                )
+            self._ai_cooldown_until = None
+            self._ai_cooldown_announced_until = None
+            return False
+        if self._ai_cooldown_announced_until != until:
+            self.operations.append_event(
+                "ai",
+                "AI_COOLDOWN_ACTIVE",
+                {"until": until.isoformat()},
+                now,
+            )
+            self._ai_cooldown_announced_until = until
+        return True
+
+    def _detect_rate_limit_after(self, symbol: str, started_at: datetime) -> bool:
+        for event in self.operations.recent_events(limit=12):
+            if event.get("action") != "RESEARCH_FAILED":
+                continue
+            payload = event.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            if str(payload.get("symbol") or "").upper() != symbol.upper():
+                continue
+            if str(payload.get("error") or "") != "OllamaRateLimitError":
+                continue
+            created_raw = str(event.get("created_at") or "")
+            try:
+                created_at = datetime.fromisoformat(created_raw)
+            except ValueError:
+                continue
+            if created_at >= started_at:
+                return True
+        return False
 
     def tick(self, now: datetime | None = None) -> None:
         """Execute at most one deep research pass so hot priority stays fresh."""
@@ -406,6 +453,20 @@ class ProductionAutonomousTrader(AutonomousTrader):
                 current,
             )
 
+        # On startup let the independent radar populate a live hot list before a
+        # slower normal candidate can monopolize the research worker.
+        if (
+            self.settings.dynamic_universe
+            and self.settings.intraday_scanner_enabled
+            and self._last_intraday_scan is None
+        ):
+            return
+
+        # Provider backpressure pauses only AI research. Market scanning, NAV,
+        # protective exits and risk monitoring continue independently.
+        if self._ai_cooldown_active(current):
+            return
+
         candidates = self._candidates(
             broker.get_positions(),
             current,
@@ -414,15 +475,15 @@ class ProductionAutonomousTrader(AutonomousTrader):
         for symbol in candidates:
             if symbol not in quotes or not self._decision_due(symbol, current):
                 continue
+            with self._intraday_state_lock:
+                priority = "hot" if symbol in self._intraday_hot else "normal"
             self.operations.append_event(
                 "research",
                 "RESEARCH_STARTED",
-                {
-                    "symbol": symbol,
-                    "priority": "hot" if symbol in self._intraday_hot else "normal",
-                },
+                {"symbol": symbol, "priority": priority},
                 current,
             )
+            research_started_at = current
             self._research_and_trade(
                 symbol=symbol,
                 mode=mode,
@@ -432,7 +493,21 @@ class ProductionAutonomousTrader(AutonomousTrader):
                 now=current,
                 new_buys_blocked=daily_loss_active or safe_mode,
             )
-            # Deliberately return after one expensive multi-agent pass. The next
-            # runtime tick rebuilds candidates from the latest radar state, so a
-            # newly-hot stock never sits behind a stale serial research backlog.
+            if self._detect_rate_limit_after(symbol, research_started_at):
+                self.state_store.clear_decision(symbol)
+                cooldown_until = datetime.now(IST) + timedelta(seconds=60)
+                self._ai_cooldown_until = cooldown_until
+                self._ai_cooldown_announced_until = cooldown_until
+                self.operations.append_event(
+                    "ai",
+                    "AI_RATE_LIMITED",
+                    {
+                        "symbol": symbol,
+                        "retry_after_seconds": 60,
+                        "until": cooldown_until.isoformat(),
+                    },
+                    datetime.now(IST),
+                )
+            # Return after one expensive pass. The next tick rebuilds candidates
+            # from the latest radar state, so stale candidate queues never build up.
             return
