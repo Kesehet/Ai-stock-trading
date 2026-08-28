@@ -6,6 +6,7 @@ from statistics import mean, pstdev
 from app.autonomous_trader import AutonomousTrader
 from app.config import Settings
 from app.history_loader import NSEHistoryLoader
+from app.market_data import Candle
 from app.models import Position, Quote
 from app.scheduler import IST
 from app.zerodha_api import ZerodhaApi
@@ -68,10 +69,7 @@ class ProductionAutonomousTrader(AutonomousTrader):
     def _clamp(value: float, lower: float, upper: float) -> float:
         return max(lower, min(upper, value))
 
-    def _opportunity_score(self, history: list[object]) -> float:
-        # ``history`` is a Candle list at runtime. Keeping this helper local to the
-        # scanner avoids coupling the production selector to a second model type.
-        candles = history
+    def _opportunity_score(self, candles: list[Candle]) -> float:
         if len(candles) < 2:
             return float("-inf")
 
