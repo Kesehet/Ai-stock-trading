@@ -330,8 +330,6 @@ class ProductionAutonomousTrader(AutonomousTrader):
             for symbol in self._active_dynamic_window(now)
             if symbol not in held_set and symbol not in promoted_set
         ]
-        # Deterministic stops/targets already protect held positions every tick.
-        # During normal operation, freshly-hot opportunities get AI time first.
         return promoted + held + rotated
 
     def _decision_due(self, symbol: str, now: datetime) -> bool:
@@ -415,8 +413,9 @@ class ProductionAutonomousTrader(AutonomousTrader):
             logger.exception("market history warm-up failed")
 
         if mode == AppMode.LIVE:
-            broker: PortfolioBroker = self._live_broker(api)
-            self._reconcile_live(broker, current)
+            live_broker = self._live_broker(api)
+            self._reconcile_live(live_broker, current)
+            broker: PortfolioBroker = live_broker
         else:
             broker = self.paper_broker
 
@@ -453,8 +452,6 @@ class ProductionAutonomousTrader(AutonomousTrader):
                 current,
             )
 
-        # On startup let the independent radar populate a live hot list before a
-        # slower normal candidate can monopolize the research worker.
         if (
             self.settings.dynamic_universe
             and self.settings.intraday_scanner_enabled
@@ -462,8 +459,6 @@ class ProductionAutonomousTrader(AutonomousTrader):
         ):
             return
 
-        # Provider backpressure pauses only AI research. Market scanning, NAV,
-        # protective exits and risk monitoring continue independently.
         if self._ai_cooldown_active(current):
             return
 
@@ -508,6 +503,4 @@ class ProductionAutonomousTrader(AutonomousTrader):
                     },
                     datetime.now(IST),
                 )
-            # Return after one expensive pass. The next tick rebuilds candidates
-            # from the latest radar state, so stale candidate queues never build up.
             return
