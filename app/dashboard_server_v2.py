@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import html
 import json
+from hmac import compare_digest
 from http.server import ThreadingHTTPServer
 from urllib.parse import urlparse
 
@@ -95,9 +96,22 @@ class DashboardServerV2Handler(DashboardServerHandler):
             session_error=session_error,
         )
 
+    def _telemetry_authorized(self) -> bool:
+        expected = self.settings.dashboard_admin_token.get_secret_value().strip()
+        if not expected:
+            return False
+        supplied = self.headers.get("Authorization", "")
+        prefix = "Bearer "
+        if not supplied.startswith(prefix):
+            return False
+        return compare_digest(supplied[len(prefix) :].strip(), expected)
+
     def do_GET(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
         if path == "/fund-status.json":
+            if not self._telemetry_authorized():
+                _write_json(self, 401, {"error": "unauthorized"})
+                return
             _write_json(self, 200, build_fund_status(self.settings))
             return
         if path != "/":
