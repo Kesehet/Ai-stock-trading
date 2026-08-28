@@ -10,7 +10,8 @@ from app.config import AppMode, Settings
 from app.history_loader import NSEHistoryLoader
 from app.intraday_scanner import IntradayOpportunity, IntradayOpportunityScanner
 from app.market_data import Candle
-from app.models import Position, Quote
+from app.models import Position, Quote, Side, TradeIntent
+from app.research_team import FundDecision
 from app.scheduler import IST, MarketPhase
 from app.zerodha_api import LiveMarketSnapshot, ZerodhaApi
 
@@ -193,6 +194,79 @@ class ProductionAutonomousTrader(AutonomousTrader):
             "intraday_position": round(item.intraday_position, 3),
             "acceleration_pct": round(item.acceleration_pct, 5),
         }
+
+    def _intent(self, symbol: str, now: datetime, decision: FundDecision) -> TradeIntent:
+        intent = super()._intent(symbol, now, decision)
+        if intent.side != Side.BUY:
+            return intent
+
+        with self._intraday_state_lock:
+            snapshot = self._intraday_snapshots.get(symbol.upper())
+        if snapshot is None or snapshot.last_price <= 0:
+            return intent
+
+        price = snapshot.last_price
+        day_range = max(0.0, snapshot.high_price - snapshot.low_price)
+        range_pct = day_range / price if price > 0 else 0.0
+        risk_pct = self._clamp(max(0.015, range_pct * 0.75), 0.015, 0.05)
+        fallback_stop = price * (1.0 - risk_pct)
+        fallback_target = price * (1.0 + (2.0 * risk_pct))
+        stop_price = (
+            intent.stop_price
+            if intent.stop_price is not None and 0 < intent.stop_price < price
+            else fallback_stop
+        )
+        target_price = (
+            intent.target_price
+            if intent.target_price is not None and intent.target_price > price
+            else fallback_target
+        )
+
+        history = self.market_data.as_of(symbol, now, limit=20)
+        recent_high = max((candle.high for candle in history), default=price)
+        breakout = (price / recent_high) - 1.0 if recent_high > 0 else 0.0
+        move = (
+            (price / snapshot.previous_close) - 1.0
+            if snapshot.previous_close > 0
+            else 0.0
+        )
+        intraday_position = (
+            (price - snapshot.low_price) / day_range if day_range > 0 else 0.5
+        )
+
+        entry_max = intent.entry_max
+        overextended = breakout >= 0.10 or (
+            move >= 0.12 and intraday_position >= 0.85
+        )
+        if overextended:
+            pullback_level = (
+                snapshot.low_price + (0.78 * day_range)
+                if day_range > 0
+                else price * 0.985
+            )
+            entry_max = min(pullback_level, price * 0.99)
+            self.operations.append_event(
+                "risk",
+                "ENTRY_PULLBACK_REQUIRED",
+                {
+                    "symbol": symbol.upper(),
+                    "last_price": price,
+                    "entry_max": entry_max,
+                    "move_pct": move,
+                    "breakout_pct": breakout,
+                    "intraday_position": intraday_position,
+                    "reason": "Momentum is strong but entry is overextended",
+                },
+                now,
+            )
+
+        return intent.model_copy(
+            update={
+                "entry_max": entry_max,
+                "stop_price": stop_price,
+                "target_price": target_price,
+            }
+        )
 
     def _intraday_scan_due(self, now: datetime) -> bool:
         if not self.settings.intraday_scanner_enabled:
