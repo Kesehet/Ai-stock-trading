@@ -23,6 +23,8 @@ class RiskLimits:
     max_open_positions: int = 10
     max_quote_age_seconds: int = 15
     min_buy_confidence: float = 0.60
+    max_trade_risk_pct: float = 0.0025
+    min_reward_risk: float = 1.5
 
 
 class RiskEngine:
@@ -57,6 +59,26 @@ class RiskEngine:
             return RiskDecision(approved=False, reason="Daily loss limit reached")
         if intent.side == Side.BUY and intent.confidence < self.limits.min_buy_confidence:
             return RiskDecision(approved=False, reason="AI confidence is below buy threshold")
+
+        if intent.side == Side.BUY and intent.stop_price is not None:
+            if intent.stop_price >= quote.last_price:
+                return RiskDecision(approved=False, reason="Buy stop must be below entry price")
+        if intent.side == Side.BUY and intent.target_price is not None:
+            if intent.target_price <= quote.last_price:
+                return RiskDecision(approved=False, reason="Buy target must be above entry price")
+        if (
+            intent.side == Side.BUY
+            and intent.stop_price is not None
+            and intent.target_price is not None
+        ):
+            downside = quote.last_price - intent.stop_price
+            upside = intent.target_price - quote.last_price
+            reward_risk = upside / downside if downside > 0 else 0.0
+            if reward_risk < self.limits.min_reward_risk:
+                return RiskDecision(
+                    approved=False,
+                    reason="Expected reward does not justify defined downside risk",
+                )
 
         matching_positions = [
             position
@@ -97,6 +119,21 @@ class RiskEngine:
             )
             additional_notional = max(0.0, desired_notional - current_value)
             notional = min(additional_notional, portfolio.cash)
+
+            # Allocation limits cap capital. A stop-defined risk budget separately
+            # caps how much portfolio equity can be lost if the thesis is wrong.
+            if intent.stop_price is not None:
+                risk_per_share = quote.last_price - intent.stop_price
+                if risk_per_share > 0:
+                    risk_budget = portfolio.equity * self.limits.max_trade_risk_pct
+                    existing_defined_risk = held_quantity * risk_per_share
+                    remaining_risk_budget = max(0.0, risk_budget - existing_defined_risk)
+                    risk_fraction = risk_per_share / quote.last_price
+                    risk_notional_cap = (
+                        remaining_risk_budget / risk_fraction if risk_fraction > 0 else 0.0
+                    )
+                    notional = min(notional, risk_notional_cap)
+
             quantity = floor(notional / quote.last_price)
             if quantity <= 0 and current_value >= desired_notional:
                 return RiskDecision(
@@ -105,7 +142,7 @@ class RiskEngine:
                 )
 
         if quantity <= 0:
-            return RiskDecision(approved=False, reason="Insufficient capital or position size")
+            return RiskDecision(false=False, reason="Insufficient capital or risk budget")
         if (
             intent.side == Side.BUY
             and intent.entry_max is not None
