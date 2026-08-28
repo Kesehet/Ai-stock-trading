@@ -98,6 +98,9 @@ class RiskEngine:
             if position.symbol == intent.symbol and position.product == intent.product
         ]
         held_quantity = sum(position.quantity for position in matching_positions)
+        existing_cost = sum(
+            position.quantity * position.average_price for position in matching_positions
+        )
         current_value = held_quantity * quote.last_price
 
         if (
@@ -134,11 +137,17 @@ class RiskEngine:
 
             # Allocation limits cap capital. A stop-defined risk budget separately
             # caps how much portfolio equity can be lost if the thesis is wrong.
+            # Existing exposure is measured from its actual cost basis to the new
+            # stop, not from today's quote, so averaging down cannot hide risk.
             if intent.stop_price is not None:
                 risk_per_share = quote.last_price - intent.stop_price
                 if risk_per_share > 0:
                     risk_budget = portfolio.equity * self.limits.max_trade_risk_pct
-                    existing_defined_risk = held_quantity * risk_per_share
+                    existing_defined_risk = sum(
+                        position.quantity
+                        * max(0.0, position.average_price - intent.stop_price)
+                        for position in matching_positions
+                    )
                     remaining_risk_budget = max(0.0, risk_budget - existing_defined_risk)
                     risk_fraction = risk_per_share / quote.last_price
                     risk_notional_cap = (
@@ -155,6 +164,35 @@ class RiskEngine:
 
         if quantity <= 0:
             return RiskDecision(approved=False, reason="Insufficient capital or risk budget")
+
+        if intent.side == Side.BUY and held_quantity > 0:
+            projected_quantity = held_quantity + quantity
+            projected_average = (
+                (existing_cost + (quantity * quote.last_price)) / projected_quantity
+            )
+            if (
+                intent.target_price is not None
+                and intent.target_price <= projected_average
+            ):
+                return RiskDecision(
+                    approved=False,
+                    reason="Target does not clear blended position cost",
+                )
+            if (
+                intent.stop_price is not None
+                and intent.target_price is not None
+                and intent.stop_price < projected_average
+            ):
+                blended_downside = projected_average - intent.stop_price
+                blended_upside = intent.target_price - projected_average
+                blended_reward_risk = (
+                    blended_upside / blended_downside if blended_downside > 0 else 0.0
+                )
+                if blended_reward_risk < self.limits.min_reward_risk:
+                    return RiskDecision(
+                        approved=False,
+                        reason="Expected reward does not justify blended position risk",
+                    )
 
         plan = OrderPlan(
             intent_id=f"{intent.thesis_id}:{int(intent.decision_at.timestamp())}",
