@@ -73,3 +73,55 @@ def test_entry_range_blocks_chasing_price() -> None:
 
     assert decision.approved is False
     assert decision.reason == "Price exceeds allowed entry range"
+
+
+def test_defined_stop_caps_position_by_equity_at_risk() -> None:
+    now = datetime.now(UTC)
+    quote = Quote(symbol="TCS", last_price=100.0, as_of=now)
+    portfolio = PortfolioSnapshot(cash=100_000, equity=100_000, open_positions=0)
+    engine = RiskEngine(
+        RiskLimits(max_position_pct=0.05, max_trade_risk_pct=0.0025)
+    )
+
+    decision = engine.evaluate(
+        make_intent(
+            target_allocation_pct=0.05,
+            entry_min=None,
+            entry_max=None,
+            stop_price=90.0,
+            target_price=120.0,
+            decision_at=now,
+            data_cutoff_at=now,
+        ),
+        quote,
+        portfolio,
+        now=now,
+    )
+
+    assert decision.approved is True
+    assert decision.order_plan is not None
+    assert decision.order_plan.quantity == 25
+
+
+def test_weak_reward_to_risk_is_rejected() -> None:
+    now = datetime.now(UTC)
+    quote = Quote(symbol="TCS", last_price=100.0, as_of=now)
+    portfolio = PortfolioSnapshot(cash=100_000, equity=100_000, open_positions=0)
+    engine = RiskEngine(RiskLimits(min_reward_risk=1.5))
+
+    decision = engine.evaluate(
+        make_intent(
+            entry_min=None,
+            entry_max=None,
+            stop_price=95.0,
+            target_price=106.0,
+            decision_at=now,
+            data_cutoff_at=now,
+        ),
+        quote,
+        portfolio,
+        now=now,
+    )
+
+    assert decision.approved is False
+    assert "reward" in decision.reason.lower()
