@@ -13,7 +13,7 @@ def _as_datetime(value: object) -> datetime | None:
         return None
 
 
-def _as_float(value: object) -> float | None:
+def _as_float(value: Any) -> float | None:
     if value is None or isinstance(value, bool):
         return None
     try:
