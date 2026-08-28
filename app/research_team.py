@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -329,9 +330,24 @@ class ResearchTeam:
         as_of: datetime,
     ) -> tuple[list[ResearchReport], FundDecision]:
         snapshot = self.context.build(symbol, as_of)
-        reports = [agent.analyze(snapshot) for agent in self.specialists]
-        bull = self.bull.analyze(symbol, as_of, reports)
-        bear = self.bear.analyze(symbol, as_of, reports)
+
+        # These four roles consume the same immutable point-in-time snapshot and do
+        # not depend on one another. Run them concurrently to reduce wall-clock
+        # latency without changing the research inputs or manager semantics.
+        with ThreadPoolExecutor(max_workers=len(self.specialists)) as executor:
+            specialist_futures = [
+                executor.submit(agent.analyze, snapshot) for agent in self.specialists
+            ]
+            reports = [future.result() for future in specialist_futures]
+
+        # Bull and bear both critique the same specialist packet and are likewise
+        # independent. Preserve deterministic report ordering after parallel work.
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            bull_future = executor.submit(self.bull.analyze, symbol, as_of, reports)
+            bear_future = executor.submit(self.bear.analyze, symbol, as_of, reports)
+            bull = bull_future.result()
+            bear = bear_future.result()
+
         reports.extend([bull, bear])
         manager = self.manager.analyze(symbol, as_of, reports)
         reports.append(manager)
