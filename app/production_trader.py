@@ -9,7 +9,7 @@ from app.history_loader import NSEHistoryLoader
 from app.intraday_scanner import IntradayOpportunity, IntradayOpportunityScanner
 from app.market_data import Candle
 from app.models import Position, Quote
-from app.scheduler import IST
+from app.scheduler import IST, MarketPhase
 from app.zerodha_api import LiveMarketSnapshot, ZerodhaApi
 
 
@@ -183,6 +183,8 @@ class ProductionAutonomousTrader(AutonomousTrader):
 
     def _intraday_scan_due(self, now: datetime) -> bool:
         if not self.settings.intraday_scanner_enabled:
+            return False
+        if self.calendar.phase_at(now) != MarketPhase.OPEN:
             return False
         if self._last_intraday_scan is None:
             return True
