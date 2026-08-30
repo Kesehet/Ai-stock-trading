@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from app.evidence.models import EvidenceItem, EvidenceKind, SourceTier
 from app.evidence.store import EvidenceStore
@@ -42,6 +42,24 @@ class FakeLLM:
                 confidence=0.7,
                 horizon="2-8 weeks",
                 thesis="Multiple agents are constructive",
+            )
+        raise AssertionError("unexpected response model")
+
+
+class HallucinatingEvidenceLLM(FakeLLM):
+    def __init__(self, valid_id: str) -> None:
+        self.valid_id = valid_id
+
+    def generate_structured(self, prompt: str, response_model):
+        if response_model is ResearchReport:
+            report = super().generate_structured(prompt, response_model)
+            return report.model_copy(
+                update={"evidence_ids": (self.valid_id, "made-up-evidence-id")}
+            )
+        if response_model is FundDecision:
+            decision = super().generate_structured(prompt, response_model)
+            return decision.model_copy(
+                update={"evidence_ids": ("made-up-evidence-id", self.valid_id)}
             )
         raise AssertionError("unexpected response model")
 
@@ -126,6 +144,77 @@ def test_context_builder_blocks_future_market_data_and_evidence(tmp_path) -> Non
     assert "C=110.00" not in snapshot.market_text
     assert "Board meeting" in snapshot.evidence_text
     assert "Future result" not in snapshot.evidence_text
+
+
+def test_context_prioritizes_material_official_evidence_over_fresh_noise(tmp_path) -> None:
+    now = datetime(2026, 8, 22, 12, 0, tzinfo=UTC)
+    store = EvidenceStore(tmp_path / "evidence.db")
+    important = EvidenceItem(
+        source_name="NSE",
+        source_tier=SourceTier.OFFICIAL,
+        kind=EvidenceKind.ANNOUNCEMENT,
+        source_url="https://example.test/regulatory",
+        title="SEBI regulatory action and penalty",
+        body="Material settlement order.",
+        symbol="TCS",
+        published_at=now - timedelta(days=2),
+        retrieved_at=now - timedelta(days=2),
+        available_at=now - timedelta(days=2),
+        trust_score=1.0,
+        fingerprint="material-official",
+    )
+    noise = EvidenceItem(
+        source_name="Generic news",
+        source_tier=SourceTier.NEWS,
+        kind=EvidenceKind.NEWS,
+        source_url="https://example.test/noise",
+        title="TCS shares in focus today",
+        body="Routine market chatter.",
+        symbol="TCS",
+        published_at=now - timedelta(minutes=5),
+        retrieved_at=now - timedelta(minutes=5),
+        available_at=now - timedelta(minutes=5),
+        trust_score=0.6,
+        fingerprint="fresh-noise",
+    )
+    store.put(important)
+    store.put(noise)
+
+    snapshot = ResearchContextBuilder(
+        HistoricalDataStore(),
+        store,
+        max_evidence=1,
+    ).build("TCS", now)
+
+    assert "SEBI regulatory action and penalty" in snapshot.evidence_text
+    assert "TCS shares in focus today" not in snapshot.evidence_text
+    assert "materiality=" in snapshot.evidence_text
+
+
+def test_research_team_rejects_hallucinated_evidence_ids(tmp_path) -> None:
+    as_of = datetime(2026, 8, 22, 1, 0, tzinfo=UTC)
+    evidence = EvidenceStore(tmp_path / "evidence.db")
+    item = EvidenceItem(
+        source_name="NSE",
+        source_tier=SourceTier.OFFICIAL,
+        kind=EvidenceKind.ANNOUNCEMENT,
+        source_url="https://example.test/result",
+        title="Quarterly financial results",
+        symbol="TCS",
+        published_at=as_of,
+        retrieved_at=as_of,
+        available_at=as_of,
+        trust_score=1.0,
+        fingerprint="valid-result",
+    )
+    evidence.put(item)
+    context = ResearchContextBuilder(HistoricalDataStore(), evidence)
+    team = ResearchTeam(HallucinatingEvidenceLLM(item.id), context)  # type: ignore[arg-type]
+
+    reports, decision = team.run("TCS", as_of)
+
+    assert all(report.evidence_ids == (item.id,) for report in reports)
+    assert decision.evidence_ids == (item.id,)
 
 
 def test_research_team_emits_structured_trade_intent(tmp_path) -> None:
