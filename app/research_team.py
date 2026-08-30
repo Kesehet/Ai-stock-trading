@@ -4,11 +4,13 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+from pathlib import Path
 from typing import Protocol
 
 from pydantic import BaseModel, Field
 
 from app.ai import OllamaClient
+from app.evidence.models import EvidenceItem
 from app.evidence.store import EvidenceStore
 from app.fundamentals import FundamentalStore
 from app.macro_context import MacroStore
@@ -16,6 +18,7 @@ from app.market_data import HistoricalDataStore
 from app.materiality import score_evidence
 from app.models import Position, Product, Quote, Side, TradeIntent
 from app.portfolio_context import build_portfolio_context
+from app.stock_memory import StockMemory, StockMemoryStore
 from app.technical_features import calculate_technical_features
 
 
@@ -64,6 +67,7 @@ class ResearchSnapshot:
     evidence_text: str
     macro_text: str
     portfolio_text: str
+    memory_text: str
     evidence_ids: tuple[str, ...] = ()
 
     def context_for(self, role: ResearchRole) -> str:
@@ -99,11 +103,13 @@ class ResearchSnapshot:
                 [
                     "PORTFOLIO:",
                     self.portfolio_text,
+                    "PRIOR STRATEGY MEMORY:",
+                    self.memory_text,
                     "MACRO REGIME:",
                     self.macro_text,
                 ]
             )
-        return "\n".join([self.market_text, self.evidence_text])
+        return "\n".join([self.market_text, self.evidence_text, self.memory_text])
 
 
 class ResearchContextBuilder:
@@ -117,6 +123,8 @@ class ResearchContextBuilder:
         live_quotes: Mapping[str, Quote] | None = None,
         max_candles: int = 60,
         max_evidence: int = 30,
+        memory: StockMemoryStore | None = None,
+        max_memory: int = 8,
     ) -> None:
         self.market_data = market_data
         self.evidence = evidence
@@ -126,14 +134,16 @@ class ResearchContextBuilder:
         self.live_quotes = live_quotes or {}
         self.max_candles = max_candles
         self.max_evidence = max_evidence
+        self.memory = memory or StockMemoryStore(
+            Path(self.evidence.path).with_name("stock-memory.sqlite3")
+        )
+        self.max_memory = max_memory
 
     @staticmethod
-    def _evidence_rank(item, as_of: datetime) -> tuple[float, float]:
+    def _evidence_rank(item: EvidenceItem, as_of: datetime) -> tuple[float, float]:
         """Prefer material, trusted evidence while retaining a freshness bias."""
         materiality = score_evidence(item).value
         age_hours = max(0.0, (as_of - item.available_at).total_seconds() / 3600.0)
-        # Seven-day half-life, but freshness is only 35% of the ranking signal so
-        # an important filing can outrank a newer low-value headline.
         freshness = 0.5 ** (age_hours / (24.0 * 7.0))
         value = materiality * (0.65 + 0.35 * freshness)
         return value, item.available_at.timestamp()
@@ -200,6 +210,10 @@ class ResearchContextBuilder:
                     for quote_symbol, quote in self.live_quotes.items()
                 },
             ).as_text()
+        memories = self.memory.recent_for_symbol(normalized_symbol, self.max_memory)
+        memory_text = "\n".join(item.as_text() for item in reversed(memories))
+        if not memory_text:
+            memory_text = "NO_PRIOR_STRATEGY_MEMORY"
         return ResearchSnapshot(
             symbol=normalized_symbol,
             as_of=as_of,
@@ -209,7 +223,32 @@ class ResearchContextBuilder:
             evidence_text=evidence_text,
             macro_text=macro_text,
             portfolio_text=portfolio_text,
+            memory_text=memory_text,
             evidence_ids=tuple(item.id for item in evidence),
+        )
+
+    def record_memory(
+        self,
+        decision: FundDecision,
+        manager_report: ResearchReport,
+        symbol: str,
+        as_of: datetime,
+    ) -> int:
+        return self.memory.append(
+            StockMemory(
+                id=None,
+                symbol=symbol,
+                recorded_at=as_of,
+                action=decision.action.value,
+                confidence=decision.confidence,
+                target_allocation_pct=decision.target_allocation_pct,
+                horizon=decision.horizon,
+                thesis=decision.thesis,
+                manager_summary=manager_report.summary,
+                evidence_ids=decision.evidence_ids,
+                stop_price=decision.stop_price,
+                target_price=decision.target_price,
+            )
         )
 
 
@@ -238,7 +277,10 @@ class SpecialistAgent:
                     "Missing fundamental/news/macro data alone must never be used "
                     "as a veto against a technically strong opportunity."
                 ),
-                "Materiality values are deterministic hints based on event type, source tier and trust.",
+                (
+                    "Materiality values are deterministic hints based on event type, "
+                    "source tier and trust."
+                ),
                 "Do not invent evidence IDs or calculate missing data yourself.",
                 "Return a score from -1 (strongly bearish) to +1 (strongly bullish).",
                 snapshot.context_for(self.role),
@@ -262,6 +304,7 @@ class DebateAgent:
         symbol: str,
         as_of: datetime,
         reports: list[ResearchReport],
+        memory_text: str,
     ) -> ResearchReport:
         reports_text = "\n".join(report.model_dump_json() for report in reports)
         prompt = "\n".join(
@@ -271,11 +314,18 @@ class DebateAgent:
                 f"Symbol: {symbol}",
                 "Critique the supplied specialist reports. Do not add new facts.",
                 (
+                    "Use prior strategy memory as historical context, not as proof that "
+                    "the old thesis is still correct. Explicitly recognize material changes."
+                ),
+                (
                     "Focus on expected upside versus downside, disagreements, "
                     "missing data and confidence levels."
                 ),
                 "Missing data is uncertainty, not automatically negative evidence.",
                 "Do not invent evidence IDs.",
+                "PRIOR STRATEGY MEMORY:",
+                memory_text,
+                "CURRENT SPECIALIST REPORTS:",
                 reports_text,
             ]
         )
@@ -294,6 +344,7 @@ class FundManagerAgent:
         symbol: str,
         as_of: datetime,
         reports: list[ResearchReport],
+        memory_text: str,
     ) -> FundDecision:
         reports_text = "\n".join(report.model_dump_json() for report in reports)
         prompt = "\n".join(
@@ -301,7 +352,12 @@ class FundManagerAgent:
                 "You are the active fund manager of an Indian cash-equity portfolio.",
                 f"Timestamp: {as_of.isoformat()}",
                 f"Symbol: {symbol}",
-                "Use only the supplied analyst reports.",
+                "Use only the supplied analyst reports and prior strategy memory.",
+                (
+                    "Prior strategy memory records what the fund believed earlier. It is "
+                    "not authoritative: preserve a sound plan when facts are unchanged, "
+                    "but revise or abandon it when current evidence invalidates it."
+                ),
                 (
                     "Primary objective: seek positive expected return after costs "
                     "while staying inside deterministic portfolio risk limits."
@@ -342,6 +398,9 @@ class FundManagerAgent:
                     "choose SELL rather than passively HOLDing."
                 ),
                 "Do not invent evidence IDs.",
+                "PRIOR STRATEGY MEMORY:",
+                memory_text,
+                "CURRENT RESEARCH REPORTS:",
                 reports_text,
             ]
         )
@@ -367,7 +426,9 @@ class ResearchTeam:
         report: ResearchReport,
         allowed_ids: set[str],
     ) -> ResearchReport:
-        valid_ids = tuple(dict.fromkeys(item for item in report.evidence_ids if item in allowed_ids))
+        valid_ids = tuple(
+            dict.fromkeys(item for item in report.evidence_ids if item in allowed_ids)
+        )
         if valid_ids == report.evidence_ids:
             return report
         return report.model_copy(update={"evidence_ids": valid_ids})
@@ -377,7 +438,9 @@ class ResearchTeam:
         decision: FundDecision,
         allowed_ids: set[str],
     ) -> FundDecision:
-        valid_ids = tuple(dict.fromkeys(item for item in decision.evidence_ids if item in allowed_ids))
+        valid_ids = tuple(
+            dict.fromkeys(item for item in decision.evidence_ids if item in allowed_ids)
+        )
         if valid_ids == decision.evidence_ids:
             return decision
         return decision.model_copy(update={"evidence_ids": valid_ids})
@@ -394,19 +457,24 @@ class ResearchTeam:
             for agent in self.specialists
         ]
         bull = self._validate_report_evidence(
-            self.bull.analyze(symbol, as_of, reports), allowed_ids
+            self.bull.analyze(symbol, as_of, reports, snapshot.memory_text),
+            allowed_ids,
         )
         bear = self._validate_report_evidence(
-            self.bear.analyze(symbol, as_of, reports), allowed_ids
+            self.bear.analyze(symbol, as_of, reports, snapshot.memory_text),
+            allowed_ids,
         )
         reports.extend([bull, bear])
         manager = self._validate_report_evidence(
-            self.manager.analyze(symbol, as_of, reports), allowed_ids
+            self.manager.analyze(symbol, as_of, reports, snapshot.memory_text),
+            allowed_ids,
         )
         reports.append(manager)
         decision = self._validate_decision_evidence(
-            self.fund_manager.decide(symbol, as_of, reports), allowed_ids
+            self.fund_manager.decide(symbol, as_of, reports, snapshot.memory_text),
+            allowed_ids,
         )
+        self.context.record_memory(decision, manager, symbol, as_of)
         return reports, decision
 
     def trade_intent(
