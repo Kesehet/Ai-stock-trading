@@ -119,6 +119,12 @@ class StockMemoryStore:
 
     @staticmethod
     def _from_row(row: sqlite3.Row) -> StockMemory:
+        raw_evidence = json.loads(str(row["evidence_ids_json"]))
+        evidence_ids = (
+            tuple(str(item) for item in raw_evidence)
+            if isinstance(raw_evidence, list)
+            else ()
+        )
         return StockMemory(
             id=int(row["id"]),
             symbol=str(row["symbol"]),
@@ -129,7 +135,7 @@ class StockMemoryStore:
             horizon=str(row["horizon"]),
             thesis=str(row["thesis"]),
             manager_summary=str(row["manager_summary"]),
-            evidence_ids=tuple(json.loads(str(row["evidence_ids_json"]))),
+            evidence_ids=evidence_ids,
             stop_price=(float(row["stop_price"]) if row["stop_price"] is not None else None),
             target_price=(
                 float(row["target_price"]) if row["target_price"] is not None else None
