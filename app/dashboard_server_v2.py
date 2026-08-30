@@ -5,6 +5,7 @@ import html
 import json
 from hmac import compare_digest
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 from urllib.parse import urlparse
 
 from app.config import Settings
@@ -16,6 +17,7 @@ from app.dashboard_server import (
 )
 from app.fund_status import build_fund_status
 from app.scheduler import IST
+from app.stock_memory import StockMemoryStore
 from app.zerodha_session import ZerodhaSession
 
 
@@ -106,13 +108,40 @@ class DashboardServerV2Handler(DashboardServerHandler):
             return False
         return compare_digest(supplied[len(prefix) :].strip(), expected)
 
+    def _strategy_memory_payload(self) -> dict[str, object]:
+        store = StockMemoryStore(Path(self.settings.data_dir) / "stock-memory.sqlite3")
+        rows = store.recent(limit=250)
+        return {
+            "schema_version": 1,
+            "entries": [
+                {
+                    "id": item.id,
+                    "symbol": item.symbol,
+                    "recorded_at": item.recorded_at.isoformat(),
+                    "action": item.action,
+                    "confidence": item.confidence,
+                    "target_allocation_pct": item.target_allocation_pct,
+                    "horizon": item.horizon,
+                    "thesis": item.thesis,
+                    "manager_summary": item.manager_summary,
+                    "evidence_ids": list(item.evidence_ids),
+                    "stop_price": item.stop_price,
+                    "target_price": item.target_price,
+                }
+                for item in rows
+            ],
+        }
+
     def do_GET(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
-        if path == "/fund-status.json":
+        if path in {"/fund-status.json", "/strategy-memory.json"}:
             if not self._telemetry_authorized():
                 _write_json(self, 401, {"error": "unauthorized"})
                 return
-            _write_json(self, 200, build_fund_status(self.settings))
+            if path == "/strategy-memory.json":
+                _write_json(self, 200, self._strategy_memory_payload())
+            else:
+                _write_json(self, 200, build_fund_status(self.settings))
             return
         if path != "/":
             super().do_GET()
