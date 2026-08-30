@@ -13,6 +13,7 @@ from app.evidence.store import EvidenceStore
 from app.fundamentals import FundamentalStore
 from app.macro_context import MacroStore
 from app.market_data import HistoricalDataStore
+from app.materiality import score_evidence
 from app.models import Position, Product, Quote, Side, TradeIntent
 from app.portfolio_context import build_portfolio_context
 from app.technical_features import calculate_technical_features
@@ -63,6 +64,7 @@ class ResearchSnapshot:
     evidence_text: str
     macro_text: str
     portfolio_text: str
+    evidence_ids: tuple[str, ...] = ()
 
     def context_for(self, role: ResearchRole) -> str:
         if role == ResearchRole.TECHNICAL:
@@ -125,14 +127,31 @@ class ResearchContextBuilder:
         self.max_candles = max_candles
         self.max_evidence = max_evidence
 
+    @staticmethod
+    def _evidence_rank(item, as_of: datetime) -> tuple[float, float]:
+        """Prefer material, trusted evidence while retaining a freshness bias."""
+        materiality = score_evidence(item).value
+        age_hours = max(0.0, (as_of - item.available_at).total_seconds() / 3600.0)
+        # Seven-day half-life, but freshness is only 35% of the ranking signal so
+        # an important filing can outrank a newer low-value headline.
+        freshness = 0.5 ** (age_hours / (24.0 * 7.0))
+        value = materiality * (0.65 + 0.35 * freshness)
+        return value, item.available_at.timestamp()
+
     def build(self, symbol: str, as_of: datetime) -> ResearchSnapshot:
         normalized_symbol = symbol.upper()
         candles = self.market_data.as_of(normalized_symbol, as_of, limit=self.max_candles)
-        evidence = self.evidence.list_as_of(
+        candidate_limit = max(self.max_evidence, self.max_evidence * 4)
+        evidence_candidates = self.evidence.list_as_of(
             as_of,
             symbol=normalized_symbol,
-            limit=self.max_evidence,
+            limit=candidate_limit,
         )
+        evidence = sorted(
+            evidence_candidates,
+            key=lambda item: self._evidence_rank(item, as_of),
+            reverse=True,
+        )[: self.max_evidence]
         market_lines: list[str] = []
         live_quote = self.live_quotes.get(normalized_symbol)
         if live_quote is not None:
@@ -148,14 +167,16 @@ class ResearchContextBuilder:
         technical_text = "NO_MARKET_DATA"
         if candles:
             technical_text = calculate_technical_features(candles).as_text()
-        evidence_text = "\n".join(
-            (
+        evidence_lines: list[str] = []
+        for item in evidence:
+            materiality = score_evidence(item)
+            evidence_lines.append(
                 f"[{item.id}] tier={item.source_tier} trust={item.trust_score:.2f} "
+                f"materiality={materiality.value:.2f} event={materiality.event_type} "
                 f"available={item.available_at.isoformat()} title={item.title} "
                 f"body={item.body[:600]}"
             )
-            for item in evidence
-        ) or "NO_EVIDENCE_DATA"
+        evidence_text = "\n".join(evidence_lines) or "NO_EVIDENCE_DATA"
         fundamental_text = "NO_FUNDAMENTAL_DATA"
         if self.fundamentals is not None:
             snapshot = self.fundamentals.latest_as_of(normalized_symbol, as_of)
@@ -188,6 +209,7 @@ class ResearchContextBuilder:
             evidence_text=evidence_text,
             macro_text=macro_text,
             portfolio_text=portfolio_text,
+            evidence_ids=tuple(item.id for item in evidence),
         )
 
 
@@ -216,6 +238,7 @@ class SpecialistAgent:
                     "Missing fundamental/news/macro data alone must never be used "
                     "as a veto against a technically strong opportunity."
                 ),
+                "Materiality values are deterministic hints based on event type, source tier and trust.",
                 "Do not invent evidence IDs or calculate missing data yourself.",
                 "Return a score from -1 (strongly bearish) to +1 (strongly bullish).",
                 snapshot.context_for(self.role),
@@ -339,19 +362,51 @@ class ResearchTeam:
         self.manager = DebateAgent(llm, ResearchRole.MANAGER)
         self.fund_manager = FundManagerAgent(llm)
 
+    @staticmethod
+    def _validate_report_evidence(
+        report: ResearchReport,
+        allowed_ids: set[str],
+    ) -> ResearchReport:
+        valid_ids = tuple(dict.fromkeys(item for item in report.evidence_ids if item in allowed_ids))
+        if valid_ids == report.evidence_ids:
+            return report
+        return report.model_copy(update={"evidence_ids": valid_ids})
+
+    @staticmethod
+    def _validate_decision_evidence(
+        decision: FundDecision,
+        allowed_ids: set[str],
+    ) -> FundDecision:
+        valid_ids = tuple(dict.fromkeys(item for item in decision.evidence_ids if item in allowed_ids))
+        if valid_ids == decision.evidence_ids:
+            return decision
+        return decision.model_copy(update={"evidence_ids": valid_ids})
+
     def run(
         self,
         symbol: str,
         as_of: datetime,
     ) -> tuple[list[ResearchReport], FundDecision]:
         snapshot = self.context.build(symbol, as_of)
-        reports = [agent.analyze(snapshot) for agent in self.specialists]
-        bull = self.bull.analyze(symbol, as_of, reports)
-        bear = self.bear.analyze(symbol, as_of, reports)
+        allowed_ids = set(snapshot.evidence_ids)
+        reports = [
+            self._validate_report_evidence(agent.analyze(snapshot), allowed_ids)
+            for agent in self.specialists
+        ]
+        bull = self._validate_report_evidence(
+            self.bull.analyze(symbol, as_of, reports), allowed_ids
+        )
+        bear = self._validate_report_evidence(
+            self.bear.analyze(symbol, as_of, reports), allowed_ids
+        )
         reports.extend([bull, bear])
-        manager = self.manager.analyze(symbol, as_of, reports)
+        manager = self._validate_report_evidence(
+            self.manager.analyze(symbol, as_of, reports), allowed_ids
+        )
         reports.append(manager)
-        decision = self.fund_manager.decide(symbol, as_of, reports)
+        decision = self._validate_decision_evidence(
+            self.fund_manager.decide(symbol, as_of, reports), allowed_ids
+        )
         return reports, decision
 
     def trade_intent(
