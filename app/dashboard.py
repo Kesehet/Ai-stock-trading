@@ -240,7 +240,7 @@ def _operations_panel(settings: Settings) -> tuple[str, str, str, str, str]:
         heartbeat_tone,
         market_phase,
         f"""<div class="ops-card card">
-<div class="chart-title"><strong>Live autonomous operations</strong><span>Auto-refreshes every 10 seconds</span></div>
+<div class="chart-title"><strong>Live autonomous operations</strong><span>Updates every 10 seconds without reloading this page</span></div>
 <div class="ops-grid">
 <div class="op-stat"><div class="label">Worker</div><div class="op-value {heartbeat_tone}">{heartbeat_label}</div><div class="small">{html.escape(heartbeat_note)}</div></div>
 <div class="op-stat"><div class="label">Market</div><div class="op-value">{html.escape(market_phase)}</div><div class="small">NSE capital market phase</div></div>
@@ -291,7 +291,6 @@ def render_dashboard(settings: Settings) -> str:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="refresh" content="10">
 <title>AI Stock Fund</title>
 <style>
 :root {{ color-scheme: dark; --bg:#07110d; --panel:#0c1813; --panel2:#101f19; --text:#f3f7f4; --muted:#8fa399; --line:#20332a; --green:#42d392; --red:#ff6b6b; --gold:#d6b45f; }}
@@ -333,6 +332,7 @@ h1 {{ margin:0; font-size:28px; letter-spacing:-.04em; }}
 </head>
 <body>
 <main>
+<div id="dashboard-live">
 <header>
 <div><h1>AI Stock Fund</h1><div class="sub">Autonomous fund operations + portfolio results.</div></div>
 <div class="mode {mode_class}">{mode} MODE</div>
@@ -356,6 +356,36 @@ h1 {{ margin:0; font-size:28px; letter-spacing:-.04em; }}
 <div class="footerline"><span>{html.escape(marked_note)}</span></div>
 </div>
 </section>
+</div>
+<script>
+(() => {{
+  const refreshMs = 10000;
+  let refreshing = false;
+
+  async function refreshDashboard() {{
+    if (refreshing || document.hidden) return;
+    refreshing = true;
+    try {{
+      const response = await fetch("/", {{cache: "no-store"}});
+      if (!response.ok) return;
+      const markup = await response.text();
+      const nextDocument = new DOMParser().parseFromString(markup, "text/html");
+      const nextLive = nextDocument.querySelector("#dashboard-live");
+      const currentLive = document.querySelector("#dashboard-live");
+      if (nextLive && currentLive) currentLive.innerHTML = nextLive.innerHTML;
+    }} catch (_error) {{
+      // Keep the currently displayed dashboard if a heartbeat request fails.
+    }} finally {{
+      refreshing = false;
+    }}
+  }}
+
+  window.setInterval(refreshDashboard, refreshMs);
+  document.addEventListener("visibilitychange", () => {{
+    if (!document.hidden) refreshDashboard();
+  }});
+}})();
+</script>
 </main>
 </body>
 </html>"""
@@ -384,7 +414,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header(
             "Content-Security-Policy",
-            "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; "
+            "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; img-src 'self'; "
             "base-uri 'none'; frame-ancestors 'none'",
         )
         self.send_header("Content-Length", str(len(content)))
