@@ -29,8 +29,8 @@ def _write_html(handler: BaseHTTPRequestHandler, status: int, body: str) -> None
     handler.send_header("Referrer-Policy", "no-referrer")
     handler.send_header(
         "Content-Security-Policy",
-        "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://kite.zerodha.com; "
-        "base-uri 'none'; frame-ancestors 'none'",
+        "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; "
+        "form-action 'self' https://kite.zerodha.com; base-uri 'none'; frame-ancestors 'none'",
     )
     handler.send_header("Content-Length", str(len(content)))
     handler.end_headers()
