@@ -11,6 +11,8 @@ from urllib.parse import parse_qs, urlparse
 from app.config import AppMode, Settings
 from app.dashboard import render_dashboard
 from app.diagnostic_export import build_diagnostic_export
+from app.integration_dashboard import render_integrations_page
+from app.integration_health import check_google_news, check_nse_archives, check_ollama, check_zerodha
 from app.live_order_ledger import LiveOrderLedger
 from app.ollama_credentials import OllamaCredentialStore, OllamaCredentials
 from app.operations import OperationsStore
@@ -88,6 +90,7 @@ def _admin_tools(
 <input type="text" name="ollama_model" value="gpt-oss:120b" autocomplete="off" placeholder="Ollama model">
 <input type="password" name="ollama_api_key" autocomplete="new-password" placeholder="Ollama API key">
 <button type="submit" name="action" value="save_ollama">Save Ollama Cloud</button>
+<a class="button" href="/integrations">Test integrations</a>
 <button type="submit" name="action" value="export">Export trading diagnostic</button>
 <a class="button" href="/zerodha/login">Connect / renew Zerodha</a>
 <input type="hidden" name="desired_mode" value="{next_mode.value}">
@@ -134,12 +137,61 @@ class DashboardServerHandler(BaseHTTPRequestHandler):
             return ZerodhaCredentials(api_key=api_key, api_secret=api_secret)
         return self.credential_store.load()
 
+    def _ollama_credentials(self) -> OllamaCredentials | None:
+        api_key = self.settings.ollama_api_key.get_secret_value().strip()
+        if api_key:
+            try:
+                return OllamaCredentials(
+                    base_url=self.settings.ollama_base_url,
+                    model=self.settings.ollama_model,
+                    api_key=api_key,
+                )
+            except ValueError:
+                return None
+        return self.ollama_store.load()
+
     def _ollama_configured(self) -> bool:
-        return bool(self.settings.ollama_api_key.get_secret_value().strip()) or self.ollama_store.load() is not None
+        return self._ollama_credentials() is not None
 
     def _session_valid(self) -> bool:
         session = self.session_store.load()
         return session is not None and session.is_valid()
+
+    def _integration_configured(self) -> dict[str, bool]:
+        return {
+            "zerodha": self._credentials() is not None and self._session_valid(),
+            "ollama": self._ollama_configured(),
+            "google_news": True,
+            "nse_archives": True,
+        }
+
+    def _run_integration_checks(self, target: str) -> list[object]:
+        allowed = {"all", "zerodha", "ollama", "google_news", "nse_archives"}
+        if target not in allowed:
+            raise ValueError("Unknown integration test target")
+        checks: list[object] = []
+        credentials = self._credentials()
+        ollama = self._ollama_credentials()
+        if target in {"all", "zerodha"}:
+            checks.append(
+                check_zerodha(
+                    credentials.api_key if credentials is not None else "",
+                    self.session_store.load(),
+                )
+            )
+        if target in {"all", "ollama"}:
+            checks.append(
+                check_ollama(
+                    ollama.base_url if ollama is not None else "",
+                    ollama.model if ollama is not None else "",
+                    ollama.api_key if ollama is not None else "",
+                )
+            )
+        if target in {"all", "google_news"}:
+            checks.append(check_google_news())
+        if target in {"all", "nse_archives"}:
+            checks.append(check_nse_archives())
+        return checks
 
     def _admin_authorized(self, supplied: str) -> bool:
         expected = self.settings.dashboard_admin_token.get_secret_value()
@@ -166,6 +218,17 @@ class DashboardServerHandler(BaseHTTPRequestHandler):
             self.send_header("Location", ZerodhaAuthClient(credentials.api_key, credentials.api_secret).login_url())
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
+            return
+        if path == "/integrations":
+            _write_html(
+                self,
+                200,
+                render_integrations_page(
+                    self._integration_configured(),
+                    None,
+                    admin_enabled=bool(self.settings.dashboard_admin_token.get_secret_value()),
+                ),
+            )
             return
         if path != "/":
             self.send_error(404)
@@ -207,6 +270,9 @@ class DashboardServerHandler(BaseHTTPRequestHandler):
         if action == "save_ollama":
             self._save_ollama(params)
             return
+        if action == "test_integrations":
+            self._test_integrations(params)
+            return
         if action == "switch_mode":
             self._switch_mode(params)
             return
@@ -242,6 +308,26 @@ class DashboardServerHandler(BaseHTTPRequestHandler):
             _write_html(self, 400, _message_page("Invalid Ollama Cloud settings", str(exc)))
             return
         _write_html(self, 200, _message_page("Ollama Cloud saved", "Remote Ollama configuration was stored securely. No local Ollama fallback is enabled."))
+
+    def _test_integrations(self, params: dict[str, list[str]]) -> None:
+        target = params.get("integration", ["all"])[0].strip().lower() or "all"
+        try:
+            checks = self._run_integration_checks(target)
+        except ValueError as exc:
+            _write_html(self, 400, _message_page("Invalid integration", str(exc)))
+            return
+        for result in checks:
+            if hasattr(result, "as_dict"):
+                self.operations.append_event("runtime", "INTEGRATION_TESTED", result.as_dict())
+        _write_html(
+            self,
+            200,
+            render_integrations_page(
+                self._integration_configured(),
+                checks,
+                admin_enabled=True,
+            ),
+        )
 
     def _switch_mode(self, params: dict[str, list[str]]) -> None:
         raw_mode = params.get("desired_mode", [""])[0].strip().lower()
