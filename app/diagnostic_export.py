@@ -82,6 +82,10 @@ def build_diagnostic_export(data_dir: str | Path, starting_cash: float) -> bytes
     paper_account = _query_rows(root / "paper.sqlite3", "SELECT * FROM account")
     live_orders = _query_rows(root / "live-orders.sqlite3", "SELECT * FROM live_orders")
     theses = _query_rows(root / "theses.sqlite3", "SELECT * FROM theses")
+    stock_memory = _query_rows(
+        root / "stock-memory.sqlite3",
+        "SELECT * FROM stock_memory ORDER BY recorded_at, id",
+    )
     audit_events = _query_rows(
         root / "operations.sqlite3",
         "SELECT * FROM audit_events ORDER BY id",
@@ -110,12 +114,11 @@ def build_diagnostic_export(data_dir: str | Path, starting_cash: float) -> bytes
 
     live_losses = _live_realized_losses(live_orders, theses)
     payload = {
-        "schema_version": 2,
+        "schema_version": 3,
         "generated_at": datetime.now(UTC).isoformat(),
         "starting_cash": starting_cash,
         "runtime_mode": _json_file(root / "runtime-mode.json").get("mode", "paper"),
         "runtime_state": _json_file(root / "runtime-state.json"),
-        # Backward-compatible paper aliases used by earlier analysis/tests.
         "account": paper_account,
         "positions": paper_positions,
         "orders": paper_orders,
@@ -135,6 +138,7 @@ def build_diagnostic_export(data_dir: str | Path, starting_cash: float) -> bytes
             ),
         },
         "theses": theses,
+        "stock_strategy_memory": stock_memory,
         "audit_events": audit_events,
         "portfolio_snapshots": snapshots,
         "security": {
