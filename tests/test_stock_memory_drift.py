@@ -1,9 +1,7 @@
-from datetime import datetime, timedelta, timezone
+# ruff: noqa: I001
+from datetime import UTC, datetime, timedelta
 
 from app.stock_memory import StockMemory, StockMemoryStore
-
-
-UTC = timezone.utc
 
 
 def _memory(
