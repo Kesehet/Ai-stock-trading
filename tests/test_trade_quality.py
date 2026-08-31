@@ -235,3 +235,76 @@ def test_trade_quality_add_on_buy_does_not_reset_open_cycle() -> None:
     assert row["mfe_pct"] == 4.1667
     assert row["mae_pct"] == -6.25
     assert row["current_return_pct"] == 1.0417
+
+
+def test_trade_quality_uses_latest_scanner_mark_for_current_return_and_giveback() -> None:
+    broker = {
+        "positions": [
+            {
+                "symbol": "GIVEBACK",
+                "product": "DELIVERY",
+                "quantity": 10,
+                "average_price": 100.0,
+            }
+        ],
+        "orders": [
+            {
+                "order_id": 1,
+                "symbol": "GIVEBACK",
+                "side": "BUY",
+                "product": "DELIVERY",
+                "quantity": 10,
+                "filled_quantity": 10,
+                "status": "FILLED",
+                "executed_at": "2026-08-28T10:00:00+05:30",
+            }
+        ],
+    }
+    scanner = {
+        "updated_at": "2026-08-28T15:29:00+05:30",
+        "previous_prices": {"GIVEBACK": 98.0},
+        "opportunity_history": {
+            "GIVEBACK": [
+                {
+                    "at": "2026-08-28T10:00:30+05:30",
+                    "price": 100.0,
+                    "score": 0.17,
+                    "move_pct": 0.04,
+                    "breakout_pct": 0.025,
+                    "volume_pace": 2.0,
+                    "intraday_position": 0.72,
+                },
+                {
+                    "at": "2026-08-28T10:15:00+05:30",
+                    "price": 104.0,
+                    "score": 0.19,
+                    "move_pct": 0.06,
+                    "breakout_pct": 0.04,
+                    "volume_pace": 2.3,
+                    "intraday_position": 0.82,
+                },
+                {
+                    "at": "2026-08-28T10:30:00+05:30",
+                    "price": 103.0,
+                    "score": 0.16,
+                    "move_pct": 0.05,
+                    "breakout_pct": 0.03,
+                    "volume_pace": 2.1,
+                    "intraday_position": 0.75,
+                },
+            ]
+        },
+    }
+
+    result = build_trade_quality(broker, scanner)
+    row = result["positions"][0]
+
+    assert row["observations"] == 3
+    assert row["current_price"] == 98.0
+    assert row["current_price_source"] == "scanner_mark"
+    assert row["mark_updated_at"] == "2026-08-28T15:29:00+05:30"
+    assert row["current_return_pct"] == -2.0
+    assert row["mfe_pct"] == 4.0
+    assert row["mae_pct"] == -2.0
+    assert row["giveback_from_mfe_pct"] == 6.0
+    assert result["gave_back_winners"][0]["symbol"] == "GIVEBACK"
