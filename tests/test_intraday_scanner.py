@@ -107,6 +107,28 @@ def test_scanner_persists_entry_quality_history(tmp_path) -> None:
     assert "intraday_position" in history[0]
 
 
+def test_scanner_preserves_prior_session_trade_quality_history(tmp_path) -> None:
+    market = _history("RIPPER")
+    state_path = tmp_path / "intraday-scanner-state.json"
+    friday = datetime(2026, 8, 21, 9, 0, tzinfo=UTC)
+    monday = datetime(2026, 8, 24, 4, 0, tzinfo=UTC)
+
+    first = IntradayOpportunityScanner(market, state_path)
+    first.rank({"RIPPER": _snapshot("RIPPER", 110.0, friday)}, friday)
+
+    restarted = IntradayOpportunityScanner(market, state_path)
+    restarted.rank({"RIPPER": _snapshot("RIPPER", 108.0, monday)}, monday)
+
+    payload = json.loads(state_path.read_text(encoding="utf-8"))
+    history = payload["opportunity_history"]["RIPPER"]
+
+    assert len(history) == 2
+    assert history[0]["session_date"] == "2026-08-21"
+    assert history[0]["price"] == 110.0
+    assert history[1]["session_date"] == "2026-08-24"
+    assert history[1]["price"] == 108.0
+
+
 def test_hot_symbol_uses_short_interrupt_cooldown(tmp_path) -> None:
     settings = Settings(
         data_dir=str(tmp_path),
