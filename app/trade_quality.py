@@ -123,6 +123,8 @@ def build_trade_quality(
         orders = []
 
     history: dict[str, list[dict[str, Any]]] = {}
+    current_marks: dict[str, float] = {}
+    mark_updated_at: str | None = None
     if isinstance(scanner_state, dict):
         raw_history = scanner_state.get("opportunity_history")
         if isinstance(raw_history, dict):
@@ -132,6 +134,17 @@ def build_trade_quality(
                 history[raw_symbol.upper()] = [
                     point for point in raw_points if isinstance(point, dict)
                 ]
+        raw_marks = scanner_state.get("previous_prices")
+        if isinstance(raw_marks, dict):
+            for raw_symbol, raw_price in raw_marks.items():
+                if not isinstance(raw_symbol, str):
+                    continue
+                mark = _as_float(raw_price)
+                if mark is not None and mark > 0:
+                    current_marks[raw_symbol.upper()] = mark
+        updated_at = scanner_state.get("updated_at")
+        if isinstance(updated_at, str):
+            mark_updated_at = updated_at
 
     rows: list[dict[str, Any]] = []
     for position in positions:
@@ -167,9 +180,13 @@ def build_trade_quality(
             if price is not None and price > 0:
                 prices.append(price)
 
-        current_price = prices[-1] if prices else None
-        high_price = max(prices) if prices else None
-        low_price = min(prices) if prices else None
+        latest_mark = current_marks.get(symbol)
+        evaluation_prices = list(prices)
+        if latest_mark is not None:
+            evaluation_prices.append(latest_mark)
+        current_price = latest_mark if latest_mark is not None else (prices[-1] if prices else None)
+        high_price = max(evaluation_prices) if evaluation_prices else None
+        low_price = min(evaluation_prices) if evaluation_prices else None
         current_return = (
             (current_price / average_price) - 1.0
             if current_price is not None
@@ -219,6 +236,15 @@ def build_trade_quality(
                 "entry_volume_pace": round(entry_volume, 3)
                 if entry_volume is not None
                 else None,
+                "current_price": round(current_price, 4)
+                if current_price is not None
+                else None,
+                "current_price_source": "scanner_mark"
+                if latest_mark is not None
+                else "opportunity_history"
+                if current_price is not None
+                else None,
+                "mark_updated_at": mark_updated_at if latest_mark is not None else None,
                 "current_return_pct": round(current_return * 100, 4)
                 if current_return is not None
                 else None,
