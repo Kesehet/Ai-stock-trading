@@ -64,13 +64,23 @@ class PersistentPaperBroker:
             if column not in columns:
                 connection.execute(statement)
 
+    @staticmethod
+    def _migrate_account_columns(connection: sqlite3.Connection) -> None:
+        columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(account)").fetchall()
+        }
+        if "initial_cash" not in columns:
+            connection.execute("ALTER TABLE account ADD COLUMN initial_cash REAL")
+
     def _initialize(self) -> None:
         with self._connect() as connection:
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS account (
                     singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
-                    cash REAL NOT NULL CHECK(cash >= 0)
+                    cash REAL NOT NULL CHECK(cash >= 0),
+                    initial_cash REAL
                 );
 
                 CREATE TABLE IF NOT EXISTS positions (
@@ -98,14 +108,29 @@ class PersistentPaperBroker:
                 );
                 """
             )
+            self._migrate_account_columns(connection)
             self._migrate_order_columns(connection)
             connection.execute(
                 """
-                INSERT OR IGNORE INTO account(singleton_id, cash)
-                VALUES (1, ?)
+                INSERT OR IGNORE INTO account(singleton_id, cash, initial_cash)
+                VALUES (1, ?, ?)
                 """,
-                (self.starting_cash,),
+                (self.starting_cash, self.starting_cash),
             )
+            row = connection.execute(
+                "SELECT initial_cash FROM account WHERE singleton_id = 1"
+            ).fetchone()
+            configured = None if row is None else row["initial_cash"]
+            if configured is None or float(configured) != float(self.starting_cash):
+                # A change in configured paper capital starts a clean paper ledger.
+                # Other durable stores (evidence, theses, strategy memory) are left
+                # untouched so learning from the previous experiment is preserved.
+                connection.execute("DELETE FROM positions")
+                connection.execute("DELETE FROM paper_orders")
+                connection.execute(
+                    "UPDATE account SET cash = ?, initial_cash = ? WHERE singleton_id = 1",
+                    (self.starting_cash, self.starting_cash),
+                )
 
     def get_cash(self) -> float:
         with self._connect() as connection:

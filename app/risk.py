@@ -18,12 +18,12 @@ class PortfolioSnapshot:
 
 @dataclass(frozen=True)
 class RiskLimits:
-    max_position_pct: float = 0.05
-    max_daily_loss_pct: float = 0.01
-    max_open_positions: int = 10
+    max_position_pct: float = 0.50
+    max_daily_loss_pct: float = 0.05
+    max_open_positions: int = 3
     max_quote_age_seconds: int = 15
     min_buy_confidence: float = 0.60
-    max_trade_risk_pct: float = 0.0025
+    max_trade_risk_pct: float = 0.02
     min_reward_risk: float = 1.5
 
 
@@ -128,17 +128,24 @@ class RiskEngine:
                 )
             quantity = min(quantity, held_quantity)
         else:
+            position_cap = portfolio.equity * self.limits.max_position_pct
             desired_notional = min(
                 portfolio.equity * intent.target_allocation_pct,
-                portfolio.equity * self.limits.max_position_pct,
+                position_cap,
             )
+            # Whole-share execution makes percentage allocations impractical in a
+            # ₹500-sized account. Permit one share when it still fits the hard
+            # position cap and available cash; the stop-based risk cap below still
+            # limits the rupees that may be lost. This is shared by paper and live.
+            if (
+                held_quantity == 0
+                and desired_notional < quote.last_price <= position_cap
+                and quote.last_price <= portfolio.cash
+            ):
+                desired_notional = quote.last_price
             additional_notional = max(0.0, desired_notional - current_value)
             notional = min(additional_notional, portfolio.cash)
 
-            # Allocation limits cap capital. A stop-defined risk budget separately
-            # caps how much portfolio equity can be lost if the thesis is wrong.
-            # Existing exposure is measured from its actual cost basis to the new
-            # stop, not from today's quote, so averaging down cannot hide risk.
             if intent.stop_price is not None:
                 risk_per_share = quote.last_price - intent.stop_price
                 if risk_per_share > 0:
