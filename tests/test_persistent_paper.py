@@ -20,7 +20,7 @@ def test_paper_account_and_positions_survive_restart(tmp_path) -> None:
     broker = PersistentPaperBroker(path, starting_cash=100_000)
 
     result = broker.place_order(_buy_plan())
-    restarted = PersistentPaperBroker(path, starting_cash=999_999)
+    restarted = PersistentPaperBroker(path, starting_cash=100_000)
 
     assert result.status == "FILLED"
     assert restarted.get_cash() == pytest.approx(99_000)
@@ -29,6 +29,17 @@ def test_paper_account_and_positions_survive_restart(tmp_path) -> None:
     assert positions[0].symbol == "TCS"
     assert positions[0].quantity == 10
     assert positions[0].average_price == pytest.approx(100)
+
+
+def test_changing_starting_cash_resets_only_paper_ledger(tmp_path) -> None:
+    path = tmp_path / "paper.sqlite3"
+    broker = PersistentPaperBroker(path, starting_cash=100_000)
+    broker.place_order(_buy_plan())
+
+    reset = PersistentPaperBroker(path, starting_cash=500)
+
+    assert reset.get_cash() == pytest.approx(500)
+    assert reset.get_positions() == []
 
 
 def test_duplicate_intent_is_idempotent(tmp_path) -> None:
