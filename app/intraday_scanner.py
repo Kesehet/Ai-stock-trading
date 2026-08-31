@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from pathlib import Path
 from statistics import mean
 
@@ -29,7 +29,11 @@ class IntradayOpportunityScanner:
     _OPEN = time(9, 15)
     _CLOSE = time(15, 30)
     _HISTORY_SYMBOLS = 20
-    _HISTORY_POINTS_PER_SYMBOL = 240
+    # Trade-quality diagnostics compare an open position with the scanner state that
+    # existed around its first fill. Keep a bounded multi-session window so a Friday
+    # entry is still measurable on Monday instead of being silently reset overnight.
+    _HISTORY_POINTS_PER_SYMBOL = 2_000
+    _HISTORY_RETENTION_DAYS = 14
 
     def __init__(
         self,
@@ -68,8 +72,9 @@ class IntradayOpportunityScanner:
                 result[symbol.upper()] = price
         return result
 
-    @staticmethod
+    @classmethod
     def _load_opportunity_history(
+        cls,
         payload: dict[str, object],
     ) -> dict[str, list[dict[str, object]]]:
         raw = payload.get("opportunity_history")
@@ -81,7 +86,7 @@ class IntradayOpportunityScanner:
                 continue
             clean = [item for item in items if isinstance(item, dict)]
             if clean:
-                result[symbol.upper()] = clean[-240:]
+                result[symbol.upper()] = clean[-cls._HISTORY_POINTS_PER_SYMBOL :]
         return result
 
     def _save_state(self, now: datetime) -> None:
@@ -198,13 +203,15 @@ class IntradayOpportunityScanner:
         snapshots: dict[str, LiveMarketSnapshot],
         now: datetime,
     ) -> None:
-        local_date = now.astimezone(IST).date().isoformat()
+        local_day = now.astimezone(IST).date()
+        local_date = local_day.isoformat()
+        cutoff_date = (local_day - timedelta(days=self._HISTORY_RETENTION_DAYS)).isoformat()
         for symbol in list(self._opportunity_history):
             points = self._opportunity_history[symbol]
             recent = [
                 point
                 for point in points
-                if str(point.get("session_date") or "") == local_date
+                if str(point.get("session_date") or "") >= cutoff_date
             ]
             if recent:
                 self._opportunity_history[symbol] = recent[-self._HISTORY_POINTS_PER_SYMBOL :]
