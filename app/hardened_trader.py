@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from app.autonomous_trader import PortfolioBroker
 from app.config import AppMode
 from app.models import Position, Quote
 from app.production_trader import ProductionAutonomousTrader
-from app.autonomous_trader import PortfolioBroker
 
 
 class HardenedProductionAutonomousTrader(ProductionAutonomousTrader):
