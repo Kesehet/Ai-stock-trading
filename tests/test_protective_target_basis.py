@@ -1,4 +1,4 @@
-from app.autonomous_trader import AutonomousTrader
+from app.hardened_trader import HardenedProductionAutonomousTrader
 from app.models import Position, Product
 
 
@@ -10,7 +10,19 @@ def test_protective_target_must_clear_actual_managed_position_basis() -> None:
         product=Product.DELIVERY,
     )
 
-    assert AutonomousTrader._target_is_profitable(position, 256.06) is False
-    assert AutonomousTrader._target_is_profitable(position, 256.18) is False
-    assert AutonomousTrader._target_is_profitable(position, 260.00) is True
-    assert AutonomousTrader._target_is_profitable(position, None) is False
+    assert (
+        HardenedProductionAutonomousTrader._target_is_profitable(position, 256.06)
+        is False
+    )
+    assert (
+        HardenedProductionAutonomousTrader._target_is_profitable(position, 256.18)
+        is False
+    )
+    assert (
+        HardenedProductionAutonomousTrader._target_is_profitable(position, 260.00)
+        is True
+    )
+    assert (
+        HardenedProductionAutonomousTrader._target_is_profitable(position, None)
+        is False
+    )
