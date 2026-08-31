@@ -149,3 +149,89 @@ def test_trade_quality_flags_extended_immediate_adverse_entry() -> None:
     assert row["mfe_pct"] < 0.5
     assert row["mae_pct"] <= -1.0
     assert result["immediate_adverse_entries"][0]["symbol"] == "CHASE"
+
+
+def test_trade_quality_add_on_buy_does_not_reset_open_cycle() -> None:
+    broker = {
+        "positions": [
+            {
+                "symbol": "AVERAGE",
+                "product": "DELIVERY",
+                "quantity": 12,
+                "average_price": 96.0,
+            }
+        ],
+        "orders": [
+            {
+                "order_id": 1,
+                "symbol": "AVERAGE",
+                "side": "BUY",
+                "product": "DELIVERY",
+                "quantity": 10,
+                "filled_quantity": 10,
+                "status": "FILLED",
+                "executed_at": "2026-08-28T10:00:00+05:30",
+            },
+            {
+                "order_id": 2,
+                "symbol": "AVERAGE",
+                "side": "BUY",
+                "product": "DELIVERY",
+                "quantity": 2,
+                "filled_quantity": 2,
+                "status": "FILLED",
+                "executed_at": "2026-08-28T10:05:00+05:30",
+            },
+        ],
+    }
+    scanner = {
+        "opportunity_history": {
+            "AVERAGE": [
+                {
+                    "at": "2026-08-28T10:00:30+05:30",
+                    "price": 100.0,
+                    "score": 0.16,
+                    "move_pct": 0.04,
+                    "breakout_pct": 0.02,
+                    "volume_pace": 2.0,
+                    "intraday_position": 0.7,
+                },
+                {
+                    "at": "2026-08-28T10:03:00+05:30",
+                    "price": 90.0,
+                    "score": 0.08,
+                    "move_pct": -0.03,
+                    "breakout_pct": -0.04,
+                    "volume_pace": 2.2,
+                    "intraday_position": 0.2,
+                },
+                {
+                    "at": "2026-08-28T10:05:30+05:30",
+                    "price": 92.0,
+                    "score": 0.09,
+                    "move_pct": -0.01,
+                    "breakout_pct": -0.02,
+                    "volume_pace": 2.1,
+                    "intraday_position": 0.35,
+                },
+                {
+                    "at": "2026-08-28T10:07:00+05:30",
+                    "price": 97.0,
+                    "score": 0.12,
+                    "move_pct": 0.01,
+                    "breakout_pct": 0.0,
+                    "volume_pace": 1.8,
+                    "intraday_position": 0.55,
+                },
+            ]
+        }
+    }
+
+    result = build_trade_quality(broker, scanner)
+    row = result["positions"][0]
+
+    assert row["tracking_from"] == "2026-08-28T10:00:00+05:30"
+    assert row["observations"] == 4
+    assert row["mfe_pct"] == 4.1667
+    assert row["mae_pct"] == -6.25
+    assert row["current_return_pct"] == 1.0417
