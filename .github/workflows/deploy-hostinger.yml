@@ -53,16 +53,16 @@ jobs:
             OLLAMA_BASE_URL=https://ollama.com
             OLLAMA_MODEL=gpt-oss:120b
             OLLAMA_API_KEY=${{ secrets.OLLAMA_API_KEY }}
-            STARTING_CASH=500000
-            MAX_POSITION_PCT=0.07
-            MAX_DAILY_LOSS_PCT=0.01
-            MAX_OPEN_POSITIONS=12
-            MIN_BUY_CONFIDENCE=0.55
+            STARTING_CASH=500
+            MAX_POSITION_PCT=0.50
+            MAX_DAILY_LOSS_PCT=0.05
+            MAX_OPEN_POSITIONS=3
+            MIN_BUY_CONFIDENCE=0.60
             PAPER_SLIPPAGE_BPS=5
             TRADING_WATCHLIST=
             DECISION_INTERVAL_SECONDS=900
             QUOTE_POLL_SECONDS=10
-            MAX_AI_CANDIDATES=8
+            MAX_AI_CANDIDATES=5
             UNIVERSE_HISTORY_DAYS=90
             UNIVERSE_MIN_PRICE=20
             UNIVERSE_MIN_HISTORY_BARS=10
@@ -89,9 +89,6 @@ jobs:
           set -euo pipefail
           URL="https://developers.hostinger.com/api/vps/v1/virtual-machines/1058562/docker/ai-stock-trading/containers"
 
-          # Hostinger replaces containers asynchronously. Old containers becoming
-          # dead/exited is normal during rollout; only judge containers whose IDs
-          # are not part of the pre-deploy generation.
           sleep 10
 
           for attempt in $(seq 1 48); do
@@ -140,7 +137,6 @@ jobs:
           HOSTINGER_API_KEY: ${{ secrets.HOSTINGER_API_KEY }}
         run: |
           set -euo pipefail
-          # Allow the first broad live scan plus initial promoted research to run.
           sleep 75
           curl --fail --silent --show-error \
             -H "Authorization: Bearer $HOSTINGER_API_KEY" \
