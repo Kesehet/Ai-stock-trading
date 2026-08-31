@@ -22,10 +22,10 @@ class Settings(BaseSettings):
     ollama_model: str = "gpt-oss:120b"
     ollama_api_key: SecretStr = SecretStr("")
 
-    starting_cash: float = Field(default=500_000, gt=0)
-    max_position_pct: float = Field(default=0.05, gt=0, le=1)
-    max_daily_loss_pct: float = Field(default=0.01, gt=0, le=1)
-    max_open_positions: int = Field(default=10, gt=0)
+    starting_cash: float = Field(default=500, gt=0)
+    max_position_pct: float = Field(default=0.50, gt=0, le=1)
+    max_daily_loss_pct: float = Field(default=0.05, gt=0, le=1)
+    max_open_positions: int = Field(default=3, gt=0)
     min_buy_confidence: float = Field(default=0.60, ge=0, le=1)
     paper_slippage_bps: float = Field(default=5.0, ge=0, le=100)
     live_order_timeout_seconds: int = Field(default=120, ge=30, le=900)
