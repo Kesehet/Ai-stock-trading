@@ -84,6 +84,7 @@ jobs:
                 recent_risk_events: (.diagnostics.recent_risk_events[:40]),
                 recent_execution_events: (.diagnostics.recent_execution_events[:40]),
                 recent_intraday_scans: (.diagnostics.recent_intraday_scans[:10]),
+                recent_thesis_drift: (.diagnostics.recent_thesis_drift[:30]),
                 error_log_excerpt: ([
                   .diagnostics.trader_log_tail[]
                   | select(test("ERROR|CRITICAL|Traceback|Exception|ValueError|HTTP [45][0-9][0-9]|failed|Failure"; "i"))

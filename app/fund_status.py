@@ -13,6 +13,7 @@ from app.nse_calendar import nse_capital_market_calendar
 from app.operations import OperationsStore
 from app.runtime_mode import RuntimeModeStore
 from app.scheduler import IST
+from app.stock_memory import StockMemoryStore
 from app.trade_quality import build_trade_quality
 
 
@@ -274,6 +275,7 @@ def build_fund_status(settings: Settings, now: datetime | None = None) -> dict[s
     data_dir = Path(settings.data_dir)
     dashboard = DashboardSnapshotStore(data_dir / "dashboard.sqlite3")
     operations = OperationsStore(data_dir / "operations.sqlite3")
+    memory = StockMemoryStore(data_dir / "stock-memory.sqlite3")
     mode = RuntimeModeStore(
         data_dir / "runtime-mode.json", default_mode=settings.app_mode
     ).load().mode
@@ -293,6 +295,7 @@ def build_fund_status(settings: Settings, now: datetime | None = None) -> dict[s
     scanner_state = _read_json(data_dir / "intraday-scanner-state.json")
     position_diagnostics = _position_diagnostics(paper, scanner_state)
     trade_quality = build_trade_quality(paper, scanner_state)
+    thesis_drift = [item.as_payload() for item in memory.recent_drift(limit=100)]
 
     heartbeat = Path(settings.heartbeat_path)
     heartbeat_age_seconds: float | None = None
@@ -340,7 +343,7 @@ def build_fund_status(settings: Settings, now: datetime | None = None) -> dict[s
     )
 
     return {
-        "schema_version": 5,
+        "schema_version": 6,
         "generated_at": current.isoformat(),
         "mode": mode.value,
         "market_phase": nse_capital_market_calendar(current).phase_at(current).value,
@@ -380,6 +383,7 @@ def build_fund_status(settings: Settings, now: datetime | None = None) -> dict[s
             "recent_risk_events": risk_events[:60],
             "recent_execution_events": execution_events[:60],
             "recent_intraday_scans": scan_events[:20],
+            "recent_thesis_drift": thesis_drift[:40],
             "audit_events": audit_events,
             "trader_log_tail": _tail_text(data_dir / "trader-diagnostics.log", 300),
             "trader_log_previous_tail": _tail_text(
