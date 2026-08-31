@@ -51,6 +51,12 @@ def _current_cycle_start(
     symbol: str,
     product: str,
 ) -> datetime | None:
+    """Return the first buy timestamp of the currently open position cycle.
+
+    Additional buys change the managed cost basis but do not create a new trade-quality
+    cycle. Resetting excursion tracking on every add-on would hide the price path that
+    led to averaging into a winner or loser.
+    """
     relevant = [
         item
         for item in orders
@@ -61,7 +67,6 @@ def _current_cycle_start(
     relevant.sort(key=lambda item: int(item.get("order_id") or 0))
     running_quantity = 0
     cycle_start: datetime | None = None
-    latest_buy: datetime | None = None
     for item in relevant:
         try:
             quantity = int(item.get("filled_quantity") or item.get("quantity") or 0)
@@ -73,13 +78,11 @@ def _current_cycle_start(
             if running_quantity <= 0:
                 cycle_start = executed_at
             running_quantity += quantity
-            latest_buy = executed_at or latest_buy
         elif side == "SELL":
             running_quantity = max(0, running_quantity - quantity)
             if running_quantity == 0:
                 cycle_start = None
-                latest_buy = None
-    return latest_buy or cycle_start
+    return cycle_start
 
 
 def _nearest_entry_point(
