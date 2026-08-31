@@ -10,9 +10,9 @@ from threading import Event, Thread
 from time import time
 
 from app.config import Settings
+from app.hardened_trader import HardenedProductionAutonomousTrader
 from app.nse_calendar import nse_capital_market_calendar
 from app.operations import OperationsStore
-from app.production_trader import ProductionAutonomousTrader
 from app.scheduler import IST, MarketPhase
 
 logger = logging.getLogger("ai-stock-trading.runtime")
@@ -39,7 +39,7 @@ def _heartbeat_worker(path: Path, stop: Event, interval_seconds: float = 5.0) ->
 
 
 def _intraday_radar_worker(
-    trader: ProductionAutonomousTrader,
+    trader: HardenedProductionAutonomousTrader,
     stop: Event,
     interval_seconds: float = 2.0,
 ) -> None:
@@ -117,7 +117,7 @@ def main() -> None:
 
     operations = OperationsStore(data_dir / "operations.sqlite3")
     calendar = nse_capital_market_calendar()
-    trader = ProductionAutonomousTrader(settings)
+    trader = HardenedProductionAutonomousTrader(settings)
     previous_phase: MarketPhase | None = None
 
     signal.signal(signal.SIGTERM, _handle_signal)
