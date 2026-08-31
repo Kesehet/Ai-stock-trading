@@ -134,7 +134,10 @@ class OllamaClient:
         schema_json = json.dumps(schema, separators=(",", ":"))
         last_error: Exception | None = None
 
-        with httpx.Client(timeout=self.timeout_seconds) as client:
+        with httpx.Client(
+            timeout=self.timeout_seconds,
+            follow_redirects=True,
+        ) as client:
             for attempt in range(1, self.structured_retries + 1):
                 strict_schema = attempt == 1
                 format_value: object = schema if strict_schema else "json"
