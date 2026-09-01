@@ -154,6 +154,58 @@ def test_tiny_account_can_buy_one_share_within_hard_risk_limits() -> None:
     assert decision.order_plan.quantity == 1
 
 
+def test_tiny_account_does_not_amplify_allocation_without_defined_stop() -> None:
+    now = datetime.now(UTC)
+    quote = Quote(symbol="CHEAP", last_price=87.0, as_of=now)
+    portfolio = PortfolioSnapshot(cash=500.0, equity=500.0, open_positions=0)
+    engine = RiskEngine(RiskLimits())
+
+    decision = engine.evaluate(
+        make_intent(
+            symbol="CHEAP",
+            target_allocation_pct=0.025,
+            entry_min=None,
+            entry_max=None,
+            stop_price=None,
+            target_price=None,
+            decision_at=now,
+            data_cutoff_at=now,
+        ),
+        quote,
+        portfolio,
+        now=now,
+    )
+
+    assert decision.approved is False
+    assert decision.reason == "Insufficient capital or risk budget"
+
+
+def test_tiny_account_rejects_one_share_when_stop_risk_exceeds_budget() -> None:
+    now = datetime.now(UTC)
+    quote = Quote(symbol="CHEAP", last_price=100.0, as_of=now)
+    portfolio = PortfolioSnapshot(cash=500.0, equity=500.0, open_positions=0)
+    engine = RiskEngine(RiskLimits(max_trade_risk_pct=0.02))
+
+    decision = engine.evaluate(
+        make_intent(
+            symbol="CHEAP",
+            target_allocation_pct=0.025,
+            entry_min=None,
+            entry_max=None,
+            stop_price=85.0,
+            target_price=125.0,
+            decision_at=now,
+            data_cutoff_at=now,
+        ),
+        quote,
+        portfolio,
+        now=now,
+    )
+
+    assert decision.approved is False
+    assert decision.reason == "Insufficient capital or risk budget"
+
+
 def test_tiny_account_does_not_override_position_cap_for_expensive_share() -> None:
     now = datetime.now(UTC)
     quote = Quote(symbol="EXPENSIVE", last_price=300.0, as_of=now)
