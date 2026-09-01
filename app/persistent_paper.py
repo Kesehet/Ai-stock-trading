@@ -214,24 +214,20 @@ class PersistentPaperBroker:
     def _trade_date(now: datetime) -> str:
         return now.astimezone(IST).date().isoformat()
 
-    @staticmethod
-    def _same_day_clause() -> str:
-        return "date(datetime(executed_at), '+5 hours', '+30 minutes') = ?"
-
     def _same_day_delivery_quantities(
         self,
         connection: sqlite3.Connection,
         symbol: str,
         trade_date: str,
     ) -> tuple[int, int]:
-        clause = self._same_day_clause()
         row = connection.execute(
-            f"""
+            """
             SELECT
                 COALESCE(SUM(CASE WHEN side = 'BUY' THEN filled_quantity ELSE 0 END), 0) AS buys,
                 COALESCE(SUM(CASE WHEN side = 'SELL' THEN filled_quantity ELSE 0 END), 0) AS sells
             FROM paper_orders
-            WHERE symbol = ? AND product = ? AND {clause}
+            WHERE symbol = ? AND product = ?
+              AND date(datetime(executed_at), '+5 hours', '+30 minutes') = ?
             """,
             (symbol, Product.DELIVERY.value, trade_date),
         ).fetchone()
@@ -248,13 +244,13 @@ class PersistentPaperBroker:
     ) -> tuple[float, float]:
         if self.charge_schedule is None:
             return current_avg, 0.0
-        clause = self._same_day_clause()
         rows = connection.execute(
-            f"""
+            """
             SELECT order_id, price, filled_quantity, charges
             FROM paper_orders
             WHERE symbol = ? AND product = ? AND side = 'BUY'
-              AND charge_treatment = 'delivery' AND {clause}
+              AND charge_treatment = 'delivery'
+              AND date(datetime(executed_at), '+5 hours', '+30 minutes') = ?
             """,
             (symbol, Product.DELIVERY.value, trade_date),
         ).fetchall()
