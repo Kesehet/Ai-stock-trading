@@ -24,6 +24,10 @@ class OllamaRateLimitError(RuntimeError):
         )
 
 
+class OllamaHTTPError(RuntimeError):
+    """Ollama/proxy returned a non-success HTTP response with safe diagnostics."""
+
+
 class OllamaClient:
     """Remote Ollama cloud client that requires schema-valid JSON output."""
 
@@ -129,6 +133,22 @@ class OllamaClient:
                 pass
         return 60.0
 
+    @staticmethod
+    def _http_error(response: httpx.Response) -> OllamaHTTPError:
+        status = getattr(response, "status_code", 0)
+        headers = getattr(response, "headers", {})
+        attempts = str(headers.get("X-Ollama-Proxy-Attempts", "?")).strip() or "?"
+        upstreams = str(headers.get("X-Ollama-Proxy-Upstreams", "?")).strip() or "?"
+        try:
+            body = response.text
+        except Exception:
+            body = ""
+        body = " ".join(str(body).split())[:500]
+        detail = f" | response={body}" if body else ""
+        return OllamaHTTPError(
+            f"Ollama HTTP {status} | proxy attempts {attempts}/{upstreams}{detail}"
+        )
+
     def generate_structured(self, prompt: str, response_model: type[T]) -> T:
         schema = response_model.model_json_schema()
         schema_json = json.dumps(schema, separators=(",", ":"))
@@ -169,11 +189,11 @@ class OllamaClient:
                     json=payload,
                     headers={"Authorization": f"Bearer {self.api_key}"},
                 )
-                # Some unit-test response doubles intentionally implement only the
-                # response methods consumed by the legacy structured-output path.
-                # Treat an absent status_code as a normal non-429 response.
-                if getattr(response, "status_code", 200) == 429:
+                status = getattr(response, "status_code", 200)
+                if status == 429:
                     raise OllamaRateLimitError(self._retry_after_seconds(response))
+                if status >= 400:
+                    raise self._http_error(response)
                 response.raise_for_status()
 
                 try:
