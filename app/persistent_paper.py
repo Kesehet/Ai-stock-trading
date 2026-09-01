@@ -347,6 +347,7 @@ class PersistentPaperBroker:
                     raise ValueError("Cannot sell more than the paper position")
 
                 buy_refund = 0.0
+                original_avg = current_avg
                 if plan.product == Product.DELIVERY:
                     same_day_buys, same_day_sells = self._same_day_delivery_quantities(
                         connection, plan.symbol, trade_date
@@ -404,7 +405,7 @@ class PersistentPaperBroker:
 
                 new_qty = current_qty - plan.quantity
                 net_proceeds = notional - charges + buy_refund
-                realized_pnl = net_proceeds - (current_avg * plan.quantity)
+                realized_pnl = net_proceeds - (original_avg * plan.quantity)
                 connection.execute(
                     "UPDATE account SET cash = ? WHERE singleton_id = 1",
                     (cash + net_proceeds,),
@@ -438,7 +439,7 @@ class PersistentPaperBroker:
                     plan.quantity,
                     now.isoformat(),
                     realized_pnl,
-                    current_avg,
+                    original_avg if plan.side == Side.SELL else current_avg,
                     charges,
                     charge_treatment,
                 ),
