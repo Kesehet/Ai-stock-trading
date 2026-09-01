@@ -3,10 +3,13 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from app.brokers import ExecutionResult
 from app.costs import EquityChargeSchedule
 from app.models import OrderPlan, Position, Product, Side
+
+IST = ZoneInfo("Asia/Kolkata")
 
 
 class PersistentPaperBroker:
@@ -30,6 +33,10 @@ class PersistentPaperBroker:
         self.slippage_bps = slippage_bps
         self.charge_schedule = charge_schedule
         self._initialize()
+
+    @staticmethod
+    def _now() -> datetime:
+        return datetime.now(UTC)
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path, timeout=10)
@@ -59,6 +66,10 @@ class PersistentPaperBroker:
                 "ALTER TABLE paper_orders ADD COLUMN reference_average_price REAL"
             ),
             "charges": "ALTER TABLE paper_orders ADD COLUMN charges REAL NOT NULL DEFAULT 0",
+            "charge_treatment": (
+                "ALTER TABLE paper_orders ADD COLUMN charge_treatment "
+                "TEXT NOT NULL DEFAULT 'delivery'"
+            ),
         }
         for column, statement in migrations.items():
             if column not in columns:
@@ -104,7 +115,14 @@ class PersistentPaperBroker:
                     executed_at TEXT NOT NULL DEFAULT '',
                     realized_pnl REAL NOT NULL DEFAULT 0,
                     reference_average_price REAL,
-                    charges REAL NOT NULL DEFAULT 0
+                    charges REAL NOT NULL DEFAULT 0,
+                    charge_treatment TEXT NOT NULL DEFAULT 'delivery'
+                );
+
+                CREATE TABLE IF NOT EXISTS paper_dp_charges (
+                    trade_date TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    PRIMARY KEY(trade_date, symbol)
                 );
                 """
             )
@@ -122,11 +140,9 @@ class PersistentPaperBroker:
             ).fetchone()
             configured = None if row is None else row["initial_cash"]
             if configured is None or float(configured) != float(self.starting_cash):
-                # A change in configured paper capital starts a clean paper ledger.
-                # Other durable stores (evidence, theses, strategy memory) are left
-                # untouched so learning from the previous experiment is preserved.
                 connection.execute("DELETE FROM positions")
                 connection.execute("DELETE FROM paper_orders")
+                connection.execute("DELETE FROM paper_dp_charges")
                 connection.execute(
                     "UPDATE account SET cash = ?, initial_cash = ? WHERE singleton_id = 1",
                     (self.starting_cash, self.starting_cash),
@@ -177,15 +193,93 @@ class PersistentPaperBroker:
             return round(plan.limit_price * (1 + slip), 2)
         return round(plan.limit_price * (1 - slip), 2)
 
-    def _charges(self, plan: OrderPlan, turnover: float) -> float:
+    def _charges(
+        self,
+        *,
+        turnover: float,
+        side: Side,
+        product: Product,
+        include_dp: bool = False,
+    ) -> float:
         if self.charge_schedule is None:
             return 0.0
         return self.charge_schedule.charges(
             turnover=turnover,
-            side=plan.side,
-            product=plan.product,
-            include_dp=plan.product == Product.DELIVERY and plan.side == Side.SELL,
+            side=side,
+            product=product,
+            include_dp=include_dp,
         )
+
+    @staticmethod
+    def _trade_date(now: datetime) -> str:
+        return now.astimezone(IST).date().isoformat()
+
+    @staticmethod
+    def _same_day_clause() -> str:
+        return "date(datetime(executed_at), '+5 hours', '+30 minutes') = ?"
+
+    def _same_day_delivery_quantities(
+        self,
+        connection: sqlite3.Connection,
+        symbol: str,
+        trade_date: str,
+    ) -> tuple[int, int]:
+        clause = self._same_day_clause()
+        row = connection.execute(
+            f"""
+            SELECT
+                COALESCE(SUM(CASE WHEN side = 'BUY' THEN filled_quantity ELSE 0 END), 0) AS buys,
+                COALESCE(SUM(CASE WHEN side = 'SELL' THEN filled_quantity ELSE 0 END), 0) AS sells
+            FROM paper_orders
+            WHERE symbol = ? AND product = ? AND {clause}
+            """,
+            (symbol, Product.DELIVERY.value, trade_date),
+        ).fetchone()
+        return int(row["buys"]), int(row["sells"])
+
+    def _reclassify_same_day_buys_as_intraday(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        symbol: str,
+        trade_date: str,
+        current_qty: int,
+        current_avg: float,
+    ) -> tuple[float, float]:
+        if self.charge_schedule is None:
+            return current_avg, 0.0
+        clause = self._same_day_clause()
+        rows = connection.execute(
+            f"""
+            SELECT order_id, price, filled_quantity, charges
+            FROM paper_orders
+            WHERE symbol = ? AND product = ? AND side = 'BUY'
+              AND charge_treatment = 'delivery' AND {clause}
+            """,
+            (symbol, Product.DELIVERY.value, trade_date),
+        ).fetchall()
+        refund = 0.0
+        for row in rows:
+            turnover = float(row["price"]) * int(row["filled_quantity"])
+            corrected = self._charges(
+                turnover=turnover,
+                side=Side.BUY,
+                product=Product.INTRADAY,
+            )
+            previous = float(row["charges"])
+            refund += previous - corrected
+            connection.execute(
+                "UPDATE paper_orders SET charges = ?, charge_treatment = 'intraday' WHERE order_id = ?",
+                (corrected, int(row["order_id"])),
+            )
+        adjusted_avg = current_avg
+        if current_qty > 0 and refund != 0:
+            adjusted_avg = current_avg - (refund / current_qty)
+            connection.execute(
+                "UPDATE positions SET average_price = ? WHERE symbol = ? AND product = ?",
+                (adjusted_avg, symbol, Product.DELIVERY.value),
+            )
+        return adjusted_avg, refund
 
     def place_order(self, plan: OrderPlan) -> ExecutionResult:
         if plan.limit_price is None:
@@ -193,7 +287,9 @@ class PersistentPaperBroker:
         if plan.side == Side.HOLD:
             raise ValueError("HOLD is not executable")
 
+        now = self._now()
         price = self._execution_price(plan)
+        trade_date = self._trade_date(now)
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             existing_order = connection.execute(
@@ -211,8 +307,7 @@ class PersistentPaperBroker:
             cash = float(account["cash"])
             position = connection.execute(
                 """
-                SELECT quantity, average_price
-                FROM positions
+                SELECT quantity, average_price FROM positions
                 WHERE symbol = ? AND product = ?
                 """,
                 (plan.symbol, plan.product.value),
@@ -220,10 +315,15 @@ class PersistentPaperBroker:
             current_qty = int(position["quantity"]) if position is not None else 0
             current_avg = float(position["average_price"]) if position is not None else price
             notional = price * plan.quantity
-            charges = self._charges(plan, notional)
             realized_pnl = 0.0
+            charge_treatment = plan.product.value.lower()
 
             if plan.side == Side.BUY:
+                charges = self._charges(
+                    turnover=notional,
+                    side=plan.side,
+                    product=plan.product,
+                )
                 total_cost = notional + charges
                 if total_cost > cash:
                     raise ValueError("Insufficient paper cash")
@@ -238,16 +338,72 @@ class PersistentPaperBroker:
                     INSERT INTO positions(symbol, product, quantity, average_price)
                     VALUES (?, ?, ?, ?)
                     ON CONFLICT(symbol, product) DO UPDATE SET
-                        quantity=excluded.quantity,
-                        average_price=excluded.average_price
+                        quantity=excluded.quantity, average_price=excluded.average_price
                     """,
                     (plan.symbol, plan.product.value, new_qty, new_avg),
                 )
             else:
                 if position is None or current_qty < plan.quantity:
                     raise ValueError("Cannot sell more than the paper position")
+
+                buy_refund = 0.0
+                if plan.product == Product.DELIVERY:
+                    same_day_buys, same_day_sells = self._same_day_delivery_quantities(
+                        connection, plan.symbol, trade_date
+                    )
+                    same_day_available = max(0, same_day_buys - same_day_sells)
+                    intraday_qty = min(plan.quantity, same_day_available)
+                    delivery_qty = plan.quantity - intraday_qty
+
+                    if intraday_qty > 0:
+                        current_avg, buy_refund = self._reclassify_same_day_buys_as_intraday(
+                            connection,
+                            symbol=plan.symbol,
+                            trade_date=trade_date,
+                            current_qty=current_qty,
+                            current_avg=current_avg,
+                        )
+                    intraday_turnover = price * intraday_qty
+                    delivery_turnover = price * delivery_qty
+                    intraday_charges = self._charges(
+                        turnover=intraday_turnover,
+                        side=Side.SELL,
+                        product=Product.INTRADAY,
+                    )
+                    include_dp = False
+                    if delivery_qty > 0:
+                        dp_row = connection.execute(
+                            "SELECT 1 FROM paper_dp_charges WHERE trade_date = ? AND symbol = ?",
+                            (trade_date, plan.symbol),
+                        ).fetchone()
+                        include_dp = dp_row is None
+                    delivery_charges = self._charges(
+                        turnover=delivery_turnover,
+                        side=Side.SELL,
+                        product=Product.DELIVERY,
+                        include_dp=include_dp,
+                    )
+                    charges = intraday_charges + delivery_charges
+                    if include_dp:
+                        connection.execute(
+                            "INSERT OR IGNORE INTO paper_dp_charges(trade_date, symbol) VALUES (?, ?)",
+                            (trade_date, plan.symbol),
+                        )
+                    if intraday_qty and delivery_qty:
+                        charge_treatment = "mixed"
+                    elif intraday_qty:
+                        charge_treatment = "intraday"
+                    else:
+                        charge_treatment = "delivery"
+                else:
+                    charges = self._charges(
+                        turnover=notional,
+                        side=plan.side,
+                        product=plan.product,
+                    )
+
                 new_qty = current_qty - plan.quantity
-                net_proceeds = notional - charges
+                net_proceeds = notional - charges + buy_refund
                 realized_pnl = net_proceeds - (current_avg * plan.quantity)
                 connection.execute(
                     "UPDATE account SET cash = ? WHERE singleton_id = 1",
@@ -260,10 +416,7 @@ class PersistentPaperBroker:
                     )
                 else:
                     connection.execute(
-                        """
-                        UPDATE positions SET quantity = ?
-                        WHERE symbol = ? AND product = ?
-                        """,
+                        "UPDATE positions SET quantity = ? WHERE symbol = ? AND product = ?",
                         (new_qty, plan.symbol, plan.product.value),
                     )
 
@@ -272,8 +425,8 @@ class PersistentPaperBroker:
                 INSERT INTO paper_orders(
                     intent_id, symbol, side, product, quantity, price, status,
                     filled_quantity, executed_at, realized_pnl,
-                    reference_average_price, charges
-                ) VALUES (?, ?, ?, ?, ?, ?, 'FILLED', ?, ?, ?, ?, ?)
+                    reference_average_price, charges, charge_treatment
+                ) VALUES (?, ?, ?, ?, ?, ?, 'FILLED', ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     plan.intent_id,
@@ -283,10 +436,11 @@ class PersistentPaperBroker:
                     plan.quantity,
                     price,
                     plan.quantity,
-                    datetime.now(UTC).isoformat(),
+                    now.isoformat(),
                     realized_pnl,
                     current_avg,
                     charges,
+                    charge_treatment,
                 ),
             )
             order_id = cursor.lastrowid
