@@ -133,12 +133,13 @@ class RiskEngine:
                 portfolio.equity * intent.target_allocation_pct,
                 position_cap,
             )
-            # Whole-share execution makes percentage allocations impractical in a
-            # ₹500-sized account. Permit one share when it still fits the hard
-            # position cap and available cash; the stop-based risk cap below still
-            # limits the rupees that may be lost. This is shared by paper and live.
+            # Whole-share execution makes small percentage allocations impractical in
+            # a ₹500-sized account. Permit the one-share override only when a defined
+            # stop exists, so the max-trade-risk budget below can actually constrain
+            # the rupee loss. This guard is shared by paper and live modes.
             if (
                 held_quantity == 0
+                and intent.stop_price is not None
                 and desired_notional < quote.last_price <= position_cap
                 and quote.last_price <= portfolio.cash
             ):
