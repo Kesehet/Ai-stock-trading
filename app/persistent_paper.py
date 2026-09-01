@@ -265,7 +265,10 @@ class PersistentPaperBroker:
             previous = float(row["charges"])
             refund += previous - corrected
             connection.execute(
-                "UPDATE paper_orders SET charges = ?, charge_treatment = 'intraday' WHERE order_id = ?",
+                (
+                    "UPDATE paper_orders SET charges = ?, "
+                    "charge_treatment = 'intraday' WHERE order_id = ?"
+                ),
                 (corrected, int(row["order_id"])),
             )
         adjusted_avg = current_avg
@@ -383,7 +386,10 @@ class PersistentPaperBroker:
                     charges = intraday_charges + delivery_charges
                     if include_dp:
                         connection.execute(
-                            "INSERT OR IGNORE INTO paper_dp_charges(trade_date, symbol) VALUES (?, ?)",
+                            (
+                                "INSERT OR IGNORE INTO paper_dp_charges"
+                                "(trade_date, symbol) VALUES (?, ?)"
+                            ),
                             (trade_date, plan.symbol),
                         )
                     if intraday_qty and delivery_qty:
