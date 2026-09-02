@@ -146,9 +146,24 @@ def test_new_symbol_is_skipped_when_position_slots_are_full() -> None:
         equity=500.0,
         open_positions=3,
         positions=(
-            Position("A", 1, 50.0, Product.DELIVERY),
-            Position("B", 1, 50.0, Product.DELIVERY),
-            Position("C", 1, 50.0, Product.DELIVERY),
+            Position(
+                symbol="A",
+                quantity=1,
+                average_price=50.0,
+                product=Product.DELIVERY,
+            ),
+            Position(
+                symbol="B",
+                quantity=1,
+                average_price=50.0,
+                product=Product.DELIVERY,
+            ),
+            Position(
+                symbol="C",
+                quantity=1,
+                average_price=50.0,
+                product=Product.DELIVERY,
+            ),
         ),
     )
 
