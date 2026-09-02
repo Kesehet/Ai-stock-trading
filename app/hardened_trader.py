@@ -8,6 +8,7 @@ from app.costs import ZERODHA_NSE_CASH_2026
 from app.dashboard_store import PortfolioSnapshot as DashboardSnapshot
 from app.models import Position, Product, Quote, Side, TradeIntent
 from app.production_trader import ProductionAutonomousTrader
+from app.research_team import FundDecision
 from app.risk import PortfolioSnapshot
 from app.scheduler import IST
 from app.stock_memory import StockMemoryStore
@@ -27,6 +28,115 @@ class HardenedProductionAutonomousTrader(ProductionAutonomousTrader):
     def _target_is_profitable(position: Position, target_price: float | None) -> bool:
         """A profit target must be strictly above the actual managed cost basis."""
         return target_price is not None and target_price > position.average_price
+
+    @staticmethod
+    def _requires_controlled_pullback(
+        *,
+        move_pct: float,
+        breakout_pct: float,
+        intraday_position: float,
+    ) -> bool:
+        """Identify fresh momentum entries whose location is vulnerable to exhaustion.
+
+        This is intentionally narrower than a momentum veto. A strong stock can still be
+        researched and bought; the system only refuses to pay near the top of the current
+        range after a material same-day extension. The 6%/78% boundary captures the two
+        repeated immediate-adverse examples observed in the ₹500 experiment while leaving
+        ordinary trend continuation untouched. A 10%+ breakout remains independently
+        overextended regardless of the day's range position.
+        """
+        return breakout_pct >= 0.10 or (
+            move_pct >= 0.06 and intraday_position >= 0.78
+        )
+
+    @staticmethod
+    def _controlled_pullback_entry_max(
+        *,
+        price: float,
+        low_price: float,
+        high_price: float,
+        existing_entry_max: float | None,
+    ) -> float:
+        """Require a meaningful retracement instead of a token one-tick pullback."""
+        day_range = max(0.0, high_price - low_price)
+        pullback_level = (
+            low_price + (0.70 * day_range)
+            if day_range > 0
+            else price * 0.985
+        )
+        candidate = min(pullback_level, price * 0.99)
+        return candidate if existing_entry_max is None else min(existing_entry_max, candidate)
+
+    def _intent(  # type: ignore[override]
+        self,
+        symbol: str,
+        now: datetime,
+        decision: FundDecision,
+    ) -> TradeIntent:
+        intent = super()._intent(symbol, now, decision)
+        if intent.side != Side.BUY:
+            return intent
+
+        normalized = symbol.upper()
+        portfolio = self._latest_portfolio
+        if portfolio is not None and any(
+            position.symbol == normalized for position in portfolio.positions
+        ):
+            return intent
+
+        with self._intraday_state_lock:
+            snapshot = self._intraday_snapshots.get(normalized)
+        if snapshot is None or snapshot.last_price <= 0:
+            return intent
+
+        price = snapshot.last_price
+        day_range = max(0.0, snapshot.high_price - snapshot.low_price)
+        move_pct = (
+            (price / snapshot.previous_close) - 1.0
+            if snapshot.previous_close > 0
+            else 0.0
+        )
+        intraday_position = (
+            (price - snapshot.low_price) / day_range if day_range > 0 else 0.5
+        )
+        history = self.market_data.as_of(normalized, now, limit=20)
+        recent_high = max((candle.high for candle in history), default=price)
+        breakout_pct = (price / recent_high) - 1.0 if recent_high > 0 else 0.0
+
+        if not self._requires_controlled_pullback(
+            move_pct=move_pct,
+            breakout_pct=breakout_pct,
+            intraday_position=intraday_position,
+        ):
+            return intent
+
+        tightened_entry_max = self._controlled_pullback_entry_max(
+            price=price,
+            low_price=snapshot.low_price,
+            high_price=snapshot.high_price,
+            existing_entry_max=intent.entry_max,
+        )
+        if intent.entry_max is not None and tightened_entry_max >= intent.entry_max:
+            return intent
+
+        self.operations.append_event(
+            "risk",
+            "ENTRY_PULLBACK_TIGHTENED",
+            {
+                "symbol": normalized,
+                "last_price": price,
+                "entry_max": tightened_entry_max,
+                "move_pct": move_pct,
+                "breakout_pct": breakout_pct,
+                "intraday_position": intraday_position,
+                "reason": (
+                    "Fresh momentum entry is materially extended near the top of the "
+                    "intraday range; wait for a controlled pullback"
+                ),
+            },
+            now,
+        )
+        return intent.model_copy(update={"entry_max": tightened_entry_max})
 
     def _valuation(
         self,
