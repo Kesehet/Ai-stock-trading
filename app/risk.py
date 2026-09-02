@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from math import floor
 
-from app.models import OrderPlan, Position, Quote, RiskDecision, Side, TradeIntent
+from app.costs import ZERODHA_NSE_CASH_2026
+from app.models import OrderPlan, Position, Product, Quote, RiskDecision, Side, TradeIntent
 
 
 @dataclass(frozen=True)
@@ -25,6 +26,7 @@ class RiskLimits:
     min_buy_confidence: float = 0.60
     max_trade_risk_pct: float = 0.02
     min_reward_risk: float = 1.5
+    expected_slippage_bps: float = 5.0
 
 
 class RiskEngine:
@@ -32,6 +34,51 @@ class RiskEngine:
 
     def __init__(self, limits: RiskLimits) -> None:
         self.limits = limits
+
+    def _delivery_cost_adjusted_reward_risk(
+        self,
+        *,
+        quantity: int,
+        entry_price: float,
+        stop_price: float,
+        target_price: float,
+    ) -> tuple[float, float, float]:
+        """Estimate overnight delivery economics after slippage and statutory costs.
+
+        A DELIVERY position can survive beyond the entry session, so a realistic
+        future exit must include the depository-participant sell fee. This matters
+        disproportionately for a one-share, roughly ₹500 bankroll.
+        """
+        slippage = max(0.0, self.limits.expected_slippage_bps) / 10_000.0
+        entry_fill = entry_price * (1.0 + slippage)
+        target_fill = target_price * (1.0 - slippage)
+        stop_fill = stop_price * (1.0 - slippage)
+
+        entry_turnover = entry_fill * quantity
+        target_turnover = target_fill * quantity
+        stop_turnover = stop_fill * quantity
+        entry_cost = ZERODHA_NSE_CASH_2026.charges(
+            turnover=entry_turnover,
+            side=Side.BUY,
+            product=Product.DELIVERY,
+        )
+        target_exit_cost = ZERODHA_NSE_CASH_2026.charges(
+            turnover=target_turnover,
+            side=Side.SELL,
+            product=Product.DELIVERY,
+            include_dp=True,
+        )
+        stop_exit_cost = ZERODHA_NSE_CASH_2026.charges(
+            turnover=stop_turnover,
+            side=Side.SELL,
+            product=Product.DELIVERY,
+            include_dp=True,
+        )
+
+        net_reward = (target_fill - entry_fill) * quantity - entry_cost - target_exit_cost
+        net_downside = (entry_fill - stop_fill) * quantity + entry_cost + stop_exit_cost
+        reward_risk = net_reward / net_downside if net_downside > 0 else 0.0
+        return net_reward, net_downside, reward_risk
 
     def evaluate(
         self,
@@ -172,6 +219,32 @@ class RiskEngine:
 
         if quantity <= 0:
             return RiskDecision(approved=False, reason="Insufficient capital or risk budget")
+
+        if (
+            intent.side == Side.BUY
+            and held_quantity == 0
+            and intent.product == Product.DELIVERY
+            and intent.stop_price is not None
+            and intent.target_price is not None
+        ):
+            net_reward, _, cost_adjusted_reward_risk = (
+                self._delivery_cost_adjusted_reward_risk(
+                    quantity=quantity,
+                    entry_price=quote.last_price,
+                    stop_price=intent.stop_price,
+                    target_price=intent.target_price,
+                )
+            )
+            if net_reward <= 0:
+                return RiskDecision(
+                    approved=False,
+                    reason="Delivery target does not clear realistic charges and slippage",
+                )
+            if cost_adjusted_reward_risk < self.limits.min_reward_risk:
+                return RiskDecision(
+                    approved=False,
+                    reason="Cost-adjusted reward does not justify delivery downside risk",
+                )
 
         if intent.side == Side.BUY and held_quantity > 0:
             projected_quantity = held_quantity + quantity

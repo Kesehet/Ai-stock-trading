@@ -140,7 +140,7 @@ def test_tiny_account_can_buy_one_share_within_hard_risk_limits() -> None:
             entry_min=None,
             entry_max=None,
             stop_price=95.0,
-            target_price=110.0,
+            target_price=155.0,
             decision_at=now,
             data_cutoff_at=now,
         ),
