@@ -5,6 +5,7 @@ from datetime import datetime, time, timedelta
 from app.autonomous_trader import PortfolioBroker
 from app.config import AppMode, Settings
 from app.costs import ZERODHA_NSE_CASH_2026
+from app.dashboard_store import PortfolioSnapshot as DashboardSnapshot
 from app.models import Position, Product, Quote, Side, TradeIntent
 from app.production_trader import ProductionAutonomousTrader
 from app.risk import PortfolioSnapshot
@@ -32,7 +33,7 @@ class HardenedProductionAutonomousTrader(ProductionAutonomousTrader):
         broker: PortfolioBroker,
         quotes: dict[str, Quote],
         now: datetime,
-    ):
+    ) -> tuple[PortfolioSnapshot, DashboardSnapshot]:
         """Cache the same managed portfolio/quotes used by risk for pre-research checks."""
         result = super()._valuation(broker, quotes, now)
         self._latest_portfolio = result[0]
