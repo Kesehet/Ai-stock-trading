@@ -226,3 +226,39 @@ def test_larger_delivery_position_can_clear_cost_adjusted_overnight_threshold() 
     assert downside > 0
     assert reward_risk >= 1.5
     assert future_exit_cost > 15.0
+
+
+def test_manali_style_late_entry_requires_controlled_pullback() -> None:
+    assert HardenedProductionAutonomousTrader._requires_controlled_pullback(
+        move_pct=0.0656,
+        breakout_pct=0.02,
+        intraday_position=0.80,
+    )
+
+
+def test_jindworld_style_late_entry_requires_controlled_pullback() -> None:
+    assert HardenedProductionAutonomousTrader._requires_controlled_pullback(
+        move_pct=0.1151,
+        breakout_pct=0.0394,
+        intraday_position=0.82,
+    )
+
+
+def test_normal_momentum_entry_is_not_forced_to_pull_back() -> None:
+    assert not HardenedProductionAutonomousTrader._requires_controlled_pullback(
+        move_pct=0.045,
+        breakout_pct=0.03,
+        intraday_position=0.82,
+    )
+
+
+def test_controlled_pullback_waits_for_seventy_percent_of_day_range() -> None:
+    entry_max = HardenedProductionAutonomousTrader._controlled_pullback_entry_max(
+        price=87.0,
+        low_price=80.0,
+        high_price=89.0,
+        existing_entry_max=None,
+    )
+
+    assert entry_max == 86.3
+    assert entry_max < 87.0
