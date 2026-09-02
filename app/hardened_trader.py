@@ -67,7 +67,12 @@ class HardenedProductionAutonomousTrader(ProductionAutonomousTrader):
         candidate = min(pullback_level, price * 0.99)
         return candidate if existing_entry_max is None else min(existing_entry_max, candidate)
 
-    def _intent(self, symbol: str, now: datetime, decision: FundDecision) -> TradeIntent:
+    def _intent(  # type: ignore[override]
+        self,
+        symbol: str,
+        now: datetime,
+        decision: FundDecision,
+    ) -> TradeIntent:
         intent = super()._intent(symbol, now, decision)
         if intent.side != Side.BUY:
             return intent
