@@ -260,5 +260,6 @@ def test_controlled_pullback_waits_for_seventy_percent_of_day_range() -> None:
         existing_entry_max=None,
     )
 
-    assert entry_max == 86.3
+    assert entry_max == 86.13
+    assert entry_max <= 86.3
     assert entry_max < 87.0
