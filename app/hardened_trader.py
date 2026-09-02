@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 
 from app.autonomous_trader import PortfolioBroker
 from app.config import AppMode, Settings
 from app.costs import ZERODHA_NSE_CASH_2026
+from app.dashboard_store import PortfolioSnapshot as DashboardSnapshot
 from app.models import Position, Product, Quote, Side, TradeIntent
 from app.production_trader import ProductionAutonomousTrader
+from app.risk import PortfolioSnapshot
 from app.scheduler import IST
 from app.stock_memory import StockMemoryStore
 
@@ -17,11 +19,50 @@ class HardenedProductionAutonomousTrader(ProductionAutonomousTrader):
     def __init__(self, settings: Settings) -> None:
         super().__init__(settings)
         self._decision_memory = StockMemoryStore(self.data_dir / "stock-memory.sqlite3")
+        self._latest_portfolio: PortfolioSnapshot | None = None
+        self._latest_quotes: dict[str, Quote] = {}
+        self._unexecutable_skip_until: dict[str, datetime] = {}
 
     @staticmethod
     def _target_is_profitable(position: Position, target_price: float | None) -> bool:
         """A profit target must be strictly above the actual managed cost basis."""
         return target_price is not None and target_price > position.average_price
+
+    def _valuation(
+        self,
+        broker: PortfolioBroker,
+        quotes: dict[str, Quote],
+        now: datetime,
+    ) -> tuple[PortfolioSnapshot, DashboardSnapshot]:
+        """Cache the same managed portfolio/quotes used by risk for pre-research checks."""
+        result = super()._valuation(broker, quotes, now)
+        self._latest_portfolio = result[0]
+        self._latest_quotes = dict(quotes)
+        return result
+
+    @staticmethod
+    def _fresh_entry_block_reason(
+        symbol: str,
+        quote: Quote,
+        portfolio: PortfolioSnapshot,
+        *,
+        max_position_pct: float,
+        max_open_positions: int,
+    ) -> str:
+        """Return a hard reason when no legal one-share fresh position can exist."""
+        normalized = symbol.upper()
+        if any(position.symbol == normalized for position in portfolio.positions):
+            return ""
+        if portfolio.open_positions >= max_open_positions:
+            return "Maximum open positions reached"
+
+        one_share_budget = max(
+            0.0,
+            min(portfolio.cash, portfolio.equity * max_position_pct),
+        )
+        if quote.last_price > one_share_budget:
+            return "One share exceeds available cash or maximum position budget"
+        return ""
 
     def _has_managed_policy(self, symbol: str) -> bool:
         return any(
@@ -43,10 +84,53 @@ class HardenedProductionAutonomousTrader(ProductionAutonomousTrader):
     def _decision_due(self, symbol: str, now: datetime) -> bool:
         if not super()._decision_due(symbol, now):
             return False
-        if self._has_managed_policy(symbol):
+
+        normalized = symbol.upper()
+        portfolio = self._latest_portfolio
+        quote = self._latest_quotes.get(normalized)
+        if portfolio is not None and quote is not None:
+            block_reason = self._fresh_entry_block_reason(
+                normalized,
+                quote,
+                portfolio,
+                max_position_pct=self.settings.max_position_pct,
+                max_open_positions=self.settings.max_open_positions,
+            )
+            if block_reason:
+                until = self._unexecutable_skip_until.get(normalized)
+                if until is None or now >= until:
+                    one_share_budget = max(
+                        0.0,
+                        min(
+                            portfolio.cash,
+                            portfolio.equity * self.settings.max_position_pct,
+                        ),
+                    )
+                    self.operations.append_event(
+                        "research",
+                        "RESEARCH_SKIPPED_UNEXECUTABLE",
+                        {
+                            "symbol": normalized,
+                            "reason": block_reason,
+                            "last_price": quote.last_price,
+                            "available_cash": portfolio.cash,
+                            "equity": portfolio.equity,
+                            "one_share_budget": one_share_budget,
+                            "open_positions": portfolio.open_positions,
+                            "max_open_positions": self.settings.max_open_positions,
+                            "max_position_pct": self.settings.max_position_pct,
+                        },
+                        now,
+                    )
+                    self._unexecutable_skip_until[normalized] = now + timedelta(
+                        seconds=max(1, self.settings.decision_interval_seconds)
+                    )
+                return False
+
+        if self._has_managed_policy(normalized):
             return True
 
-        latest = self._decision_memory.recent_for_symbol(symbol, limit=1)
+        latest = self._decision_memory.recent_for_symbol(normalized, limit=1)
         if not latest:
             return True
         cooldown = self._flat_symbol_cooldown_seconds(
