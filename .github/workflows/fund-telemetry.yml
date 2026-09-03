@@ -71,7 +71,10 @@ jobs:
                 unmeasured_positions: .trade_quality.unmeasured_positions,
                 immediate_adverse_entries: .trade_quality.immediate_adverse_entries,
                 gave_back_winners: .trade_quality.gave_back_winners,
-                by_entry_setup: .trade_quality.by_entry_setup
+                by_entry_setup: .trade_quality.by_entry_setup,
+                recent_closed_trades: (.trade_quality.recent_closed_trades[:40]),
+                measured_closed_trades: .trade_quality.measured_closed_trades,
+                closed_by_entry_setup: .trade_quality.closed_by_entry_setup
               },
               strategy_memory: ($memory[0].entries[:120]),
               runtime_state,
