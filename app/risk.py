@@ -27,6 +27,7 @@ class RiskLimits:
     max_trade_risk_pct: float = 0.02
     min_reward_risk: float = 1.5
     expected_slippage_bps: float = 5.0
+    max_whole_share_allocation_multiple: float = 2.0
 
 
 class RiskEngine:
@@ -181,15 +182,28 @@ class RiskEngine:
                 position_cap,
             )
             # Whole-share execution makes small percentage allocations impractical in
-            # a ₹500-sized account. Permit the one-share override only when a defined
-            # stop exists, so the max-trade-risk budget below can actually constrain
-            # the rupee loss. This guard is shared by paper and live modes.
+            # a tiny account. Permit a one-share override only when the minimum
+            # executable position is still reasonably close to the AI's requested
+            # allocation. This avoids silently turning a 2.5% idea into a ~46%
+            # position while preserving whole-share execution for modest overshoots.
             if (
                 held_quantity == 0
                 and intent.stop_price is not None
                 and desired_notional < quote.last_price <= position_cap
                 and quote.last_price <= portfolio.cash
             ):
+                requested_notional = portfolio.equity * intent.target_allocation_pct
+                max_granular_notional = (
+                    requested_notional * self.limits.max_whole_share_allocation_multiple
+                )
+                if requested_notional <= 0 or quote.last_price > max_granular_notional:
+                    return RiskDecision(
+                        approved=False,
+                        reason=(
+                            "Minimum whole-share position materially exceeds requested "
+                            "allocation"
+                        ),
+                    )
                 desired_notional = quote.last_price
             additional_notional = max(0.0, desired_notional - current_value)
             notional = min(additional_notional, portfolio.cash)
@@ -251,10 +265,7 @@ class RiskEngine:
             projected_average = (
                 (existing_cost + (quantity * quote.last_price)) / projected_quantity
             )
-            if (
-                intent.target_price is not None
-                and intent.target_price <= projected_average
-            ):
+            if intent.target_price is not None and intent.target_price <= projected_average:
                 return RiskDecision(
                     approved=False,
                     reason="Target does not clear blended position cost",
