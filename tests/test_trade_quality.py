@@ -308,3 +308,85 @@ def test_trade_quality_uses_latest_scanner_mark_for_current_return_and_giveback(
     assert row["mae_pct"] == -2.0
     assert row["giveback_from_mfe_pct"] == 6.0
     assert result["gave_back_winners"][0]["symbol"] == "GIVEBACK"
+
+
+def test_trade_quality_preserves_closed_cycle_excursions_after_exit() -> None:
+    broker = {
+        "positions": [],
+        "orders": [
+            {
+                "order_id": 1,
+                "symbol": "CLOSED",
+                "side": "BUY",
+                "product": "DELIVERY",
+                "quantity": 1,
+                "filled_quantity": 1,
+                "status": "FILLED",
+                "price": 100.0,
+                "executed_at": "2026-08-28T10:00:00+05:30",
+                "realized_pnl": 0.0,
+            },
+            {
+                "order_id": 2,
+                "symbol": "CLOSED",
+                "side": "SELL",
+                "product": "DELIVERY",
+                "quantity": 1,
+                "filled_quantity": 1,
+                "status": "FILLED",
+                "price": 102.0,
+                "executed_at": "2026-08-28T10:30:00+05:30",
+                "realized_pnl": 1.85,
+            },
+        ],
+    }
+    scanner = {
+        "opportunity_history": {
+            "CLOSED": [
+                {
+                    "at": "2026-08-28T09:59:30+05:30",
+                    "price": 100.0,
+                    "score": 0.18,
+                    "move_pct": 0.05,
+                    "breakout_pct": 0.025,
+                    "volume_pace": 2.0,
+                    "intraday_position": 0.72,
+                },
+                {
+                    "at": "2026-08-28T10:10:00+05:30",
+                    "price": 106.0,
+                    "score": 0.21,
+                    "move_pct": 0.08,
+                    "breakout_pct": 0.05,
+                    "volume_pace": 3.0,
+                    "intraday_position": 0.88,
+                },
+                {
+                    "at": "2026-08-28T10:20:00+05:30",
+                    "price": 98.0,
+                    "score": 0.10,
+                    "move_pct": 0.01,
+                    "breakout_pct": -0.01,
+                    "volume_pace": 2.4,
+                    "intraday_position": 0.35,
+                },
+            ]
+        }
+    }
+
+    result = build_trade_quality(broker, scanner)
+
+    assert result["positions"] == []
+    assert result["measured_positions"] == 0
+    assert result["measured_closed_trades"] == 1
+    row = result["recent_closed_trades"][0]
+    assert row["symbol"] == "CLOSED"
+    assert row["closed"] is True
+    assert row["entry_setup"] == "breakout_confirmation"
+    assert row["exit_price"] == 102.0
+    assert row["mfe_pct"] == 6.0
+    assert row["mae_pct"] == -2.0
+    assert row["current_return_pct"] == 2.0
+    assert row["giveback_from_mfe_pct"] == 4.0
+    assert row["realized_pnl"] == 1.85
+    assert result["closed_by_entry_setup"]["breakout_confirmation"]["count"] == 1
