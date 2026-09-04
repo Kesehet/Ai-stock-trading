@@ -18,7 +18,7 @@ permissions:
 jobs:
   snapshot:
     runs-on: ubuntu-latest
-    timeout-minutes: 1
+    timeout-minutes: 3
     steps:
       - name: Fetch and summarize deep fund telemetry
         shell: bash
@@ -28,12 +28,19 @@ jobs:
           set -euo pipefail
           BASE_URL="https://ai-stock-trading.srv1058562.hstgr.cloud"
           test -n "$TELEMETRY_TOKEN"
-          curl --fail --silent --show-error --max-time 20 --retry 1 \
-            -H "Authorization: Bearer $TELEMETRY_TOKEN" \
-            "$BASE_URL/fund-status.json" -o fund-status.json
-          curl --fail --silent --show-error --max-time 20 --retry 1 \
+
+          # Strategy memory is the cheaper endpoint, so capture it first. The deep
+          # fund snapshot can occasionally wait on SQLite readers while the trader
+          # is active; allow enough time for one bounded retry instead of failing
+          # after the old 20-second ceiling.
+          curl --fail --silent --show-error --connect-timeout 10 --max-time 60 \
+            --retry 1 --retry-delay 2 --retry-all-errors \
             -H "Authorization: Bearer $TELEMETRY_TOKEN" \
             "$BASE_URL/strategy-memory.json" -o strategy-memory.json
+          curl --fail --silent --show-error --connect-timeout 10 --max-time 60 \
+            --retry 1 --retry-delay 2 --retry-all-errors \
+            -H "Authorization: Bearer $TELEMETRY_TOKEN" \
+            "$BASE_URL/fund-status.json" -o fund-status.json
           jq -e . fund-status.json >/dev/null
           jq -e . strategy-memory.json >/dev/null
 
