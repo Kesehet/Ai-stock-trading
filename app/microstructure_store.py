@@ -3,11 +3,14 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections.abc import Iterator, Mapping, Sequence
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from threading import Lock
+from zoneinfo import ZoneInfo
 
 from app.microstructure import BookLevel, BookTick
+
+IST = ZoneInfo("Asia/Kolkata")
 
 
 class KiteFullTickAdapter:
@@ -42,9 +45,10 @@ class KiteFullTickAdapter:
         if timestamp is None:
             timestamp = _as_datetime(raw.get("timestamp"))
         if timestamp is None:
-            timestamp = received_at or datetime.now(tz=UTC)
+            timestamp = received_at or datetime.now(tz=IST)
         elif timestamp.tzinfo is None:
-            timestamp = timestamp.replace(tzinfo=UTC)
+            # Kite exchange timestamps are exchange-local wall-clock times.
+            timestamp = timestamp.replace(tzinfo=IST)
 
         return BookTick(
             symbol=symbol,
@@ -157,13 +161,21 @@ class MicrostructureEventStore:
         self,
         *,
         symbol: str | None = None,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
         limit: int | None = None,
     ) -> Iterator[BookTick]:
         clauses: list[str] = []
         values: list[object] = []
         if symbol is not None:
             clauses.append("symbol = ?")
-            values.append(symbol)
+            values.append(symbol.upper())
+        if start_at is not None:
+            clauses.append("event_timestamp >= ?")
+            values.append(start_at.isoformat())
+        if end_at is not None:
+            clauses.append("event_timestamp <= ?")
+            values.append(end_at.isoformat())
         query = (
             "SELECT symbol, event_timestamp, last_price, last_quantity, volume, "
             "bids_json, asks_json FROM microstructure_events"
@@ -190,6 +202,13 @@ class MicrostructureEventStore:
                 asks=_levels_from_json(str(row[6])),
             )
 
+    def symbols(self) -> tuple[str, ...]:
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT DISTINCT symbol FROM microstructure_events ORDER BY symbol"
+            ).fetchall()
+        return tuple(str(row[0]) for row in rows)
+
     def count(self, *, symbol: str | None = None) -> int:
         with self._lock:
             if symbol is None:
@@ -199,7 +218,7 @@ class MicrostructureEventStore:
             else:
                 row = self._connection.execute(
                     "SELECT COUNT(*) FROM microstructure_events WHERE symbol = ?",
-                    (symbol,),
+                    (symbol.upper(),),
                 ).fetchone()
         return int(row[0]) if row is not None else 0
 
