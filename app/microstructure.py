@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from math import floor
 
+from app.costs import ZERODHA_NSE_CASH_2026
+from app.models import Product, Side
+
 
 @dataclass(frozen=True)
 class BookLevel:
@@ -142,7 +145,6 @@ class MicrostructureEngine:
             + 0.15 * f.order_flow_imbalance
             + 0.10 * f.trade_momentum
         )
-        # Deliberately conservative calibration until NSE event data can fit it.
         probability_up = self._clip(0.5 + 0.45 * score, 0.02, 0.98)
         return HorizonForecast(
             horizon_events=horizon_events,
@@ -192,16 +194,19 @@ class MicrostructureEngine:
     ) -> float:
         buy_value = buy_price * quantity
         sell_value = sell_price * quantity
+        buy_charges = ZERODHA_NSE_CASH_2026.charges(
+            turnover=buy_value,
+            side=Side.BUY,
+            product=Product.INTRADAY,
+        )
+        sell_charges = ZERODHA_NSE_CASH_2026.charges(
+            turnover=sell_value,
+            side=Side.SELL,
+            product=Product.INTRADAY,
+        )
         turnover = buy_value + sell_value
-        brokerage = min(20.0, buy_value * 0.0003) + min(20.0, sell_value * 0.0003)
-        # Conservative NSE-equity approximations; centralize against app.costs next.
-        stt = sell_value * 0.00025
-        exchange = turnover * 0.0000297
-        sebi = turnover * 0.000001
-        stamp = buy_value * 0.00003
-        gst = (brokerage + exchange + sebi) * 0.18
         slippage = turnover * (self.config.slippage_bps_each_way / 10_000.0)
-        return brokerage + stt + exchange + sebi + stamp + gst + slippage
+        return buy_charges + sell_charges + slippage
 
     @staticmethod
     def _order_flow_imbalance(tick: BookTick, previous: BookTick | None) -> float:
