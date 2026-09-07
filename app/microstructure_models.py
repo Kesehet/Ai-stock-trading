@@ -9,7 +9,8 @@ from app.microstructure import HorizonForecast, MicroFeatures
 
 
 class ForecastModel(Protocol):
-    name: str
+    @property
+    def name(self) -> str: ...
 
     def forecast(self, features: MicroFeatures, horizon_events: int) -> HorizonForecast: ...
 
@@ -81,12 +82,13 @@ class ChronologicalLogisticModel:
 
 
 def default_models() -> tuple[ForecastModel, ...]:
-    return (
+    models: tuple[ForecastModel, ...] = (
         QueueImbalanceModel(),
         MicropriceMomentumModel(),
         FlowMomentumModel(),
         EnsembleModel(),
     )
+    return models
 
 
 def fit_chronological_logistic(
