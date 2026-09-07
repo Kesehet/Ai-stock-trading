@@ -44,7 +44,8 @@ def test_order_flow_detects_bid_build_and_ask_depletion() -> None:
 
 
 def test_expensive_share_is_not_executable_with_half_of_500_capital() -> None:
-    engine = MicrostructureEngine(MicrostructureConfig(min_probability=0.50, min_expected_net_rupees=-99))
+    config = MicrostructureConfig(min_probability=0.50, min_expected_net_rupees=-99)
+    engine = MicrostructureEngine(config)
     expensive = tick(bid=299.95, ask=300.0, last=300.0)
     assert engine.on_tick(expensive) == []
 
