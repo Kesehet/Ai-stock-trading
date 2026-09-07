@@ -118,7 +118,9 @@ class MicrostructureEventStore:
                 ),
             )
             self._connection.commit()
-            event_id = int(cursor.lastrowid)
+            event_id = cursor.lastrowid
+            if event_id is None:
+                raise RuntimeError("SQLite did not return a microstructure event id")
             self._inserts += 1
             if self._inserts % self.prune_every == 0:
                 self._prune_symbol(tick.symbol)
