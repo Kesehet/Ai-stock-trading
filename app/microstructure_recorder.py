@@ -11,10 +11,11 @@ from tempfile import NamedTemporaryFile
 from typing import Any
 
 import httpx
-from kiteconnect import KiteTicker  # type: ignore[import-untyped]
 
 from app.config import Settings
-from app.microstructure_store import KiteFullTickAdapter, MicrostructureEventStore
+from app.kite_depth_stream import KiteDepthStream
+from app.microstructure import BookTick
+from app.microstructure_store import MicrostructureEventStore
 from app.microstructure_universe import (
     AffordableInstrument,
     discover_affordable_universe,
@@ -42,7 +43,11 @@ class ReadOnlyKiteMarketData:
     ) -> None:
         self.api_key = api_key
         self.session = session
-        self.timeout_seconds = timeout_seconds
+        self._timeout_seconds = timeout_seconds
+
+    @property
+    def timeout_seconds(self) -> float:
+        return self._timeout_seconds
 
     @property
     def headers(self) -> dict[str, str]:
@@ -58,7 +63,7 @@ class ReadOnlyKiteMarketData:
         requested = [symbol.strip().upper() for symbol in symbols if symbol.strip()]
         if not requested:
             return {}
-        params = [("i", f"NSE:{symbol}") for symbol in requested]
+        params = httpx.QueryParams([("i", f"NSE:{symbol}") for symbol in requested])
         with httpx.Client(timeout=self.timeout_seconds) as client:
             response = client.get(
                 f"{KITE_API_BASE}/quote",
@@ -109,9 +114,8 @@ class MicrostructureRecorder:
         )
         self.status_path = self.data_dir / "microstructure-status.json"
         self.event_path = self.data_dir / "microstructure-events.sqlite3"
-        self._ticker: Any | None = None
+        self._stream: KiteDepthStream | None = None
         self._store: MicrostructureEventStore | None = None
-        self._symbols_by_token: dict[int, str] = {}
         self._events_recorded = 0
         self._last_event_at: datetime | None = None
         self._last_status_write: datetime | None = None
@@ -146,36 +150,20 @@ class MicrostructureRecorder:
             self._write_status("no_universe", message="no affordable liquid symbols discovered")
             return 3
 
-        self._symbols_by_token = {item.token: item.symbol for item in universe}
-        adapter = KiteFullTickAdapter(self._symbols_by_token)
+        symbols_by_token = {item.token: item.symbol for item in universe}
         self._store = MicrostructureEventStore(
             self.event_path,
             max_events_per_symbol=self.settings.microstructure_max_events_per_symbol,
             prune_every=self.settings.microstructure_prune_every,
         )
-        ticker = KiteTicker(api_key, session.access_token)
-        self._ticker = ticker
-        instrument_tokens = list(self._symbols_by_token)
+        self._stream = KiteDepthStream(api_key, session.access_token, symbols_by_token)
 
-        def on_connect(ws: Any, response: Any) -> None:
-            del response
-            self._connected = True
-            ws.subscribe(instrument_tokens)
-            ws.set_mode(ws.MODE_FULL, instrument_tokens)
-            self._write_status("connected", universe=universe)
-
-        def on_ticks(ws: Any, raw_ticks: list[dict[str, Any]]) -> None:
-            del ws
+        def on_ticks(ticks: list[BookTick]) -> None:
             now = datetime.now(IST)
-            converted = [
-                tick
-                for raw in raw_ticks
-                if (tick := adapter.from_tick(raw, received_at=now)) is not None
-            ]
-            if not converted or self._store is None:
+            if not ticks or self._store is None:
                 return
-            self._store.record_many(converted)
-            self._events_recorded += len(converted)
+            self._store.record_many(ticks)
+            self._events_recorded += len(ticks)
             self._last_event_at = now
             should_write = (
                 self._last_status_write is None
@@ -184,31 +172,14 @@ class MicrostructureRecorder:
             if should_write:
                 self._write_status("connected", universe=universe)
 
-        def on_close(ws: Any, code: int, reason: str) -> None:
-            del ws
-            self._connected = False
-            self._write_status(
-                "disconnected",
-                universe=universe,
-                message=f"{code}: {reason}",
-            )
+        def on_state(state: str, message: str) -> None:
+            self._connected = state == "connected"
+            self._write_status(state, universe=universe, message=message)
 
-        def on_error(ws: Any, code: int, reason: str) -> None:
-            del ws
-            self._write_status(
-                "error",
-                universe=universe,
-                message=f"{code}: {reason}",
-            )
-
-        ticker.on_connect = on_connect
-        ticker.on_ticks = on_ticks
-        ticker.on_close = on_close
-        ticker.on_error = on_error
         self._install_signal_handlers()
         self._write_status("connecting", universe=universe)
         try:
-            ticker.connect(threaded=False)
+            self._stream.run(on_ticks, on_state)
         finally:
             if self._store is not None:
                 self._store.close()
@@ -222,12 +193,9 @@ class MicrostructureRecorder:
 
     def request_stop(self) -> None:
         self._stop_requested = True
-        ticker = self._ticker
-        if ticker is not None:
-            try:
-                ticker.close()
-            except Exception:
-                logger.exception("failed to close microstructure websocket cleanly")
+        stream = self._stream
+        if stream is not None:
+            stream.stop()
 
     def _load_session(self) -> tuple[str | None, ZerodhaSession | None]:
         api_key = self.settings.zerodha_api_key.strip()
