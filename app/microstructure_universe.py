@@ -12,8 +12,11 @@ from app.zerodha_api import KITE_API_BASE, LiveMarketSnapshot
 
 
 class MarketSnapshotApi(Protocol):
-    headers: Mapping[str, str]
-    timeout_seconds: float
+    @property
+    def headers(self) -> Mapping[str, str]: ...
+
+    @property
+    def timeout_seconds(self) -> float: ...
 
     def market_snapshots(
         self,
