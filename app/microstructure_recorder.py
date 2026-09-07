@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import signal
+import time
 from collections.abc import Mapping
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -33,7 +34,12 @@ class ReadOnlyKiteMarketData:
     This object intentionally exposes no order-placement methods.
     """
 
-    def __init__(self, api_key: str, session: ZerodhaSession, timeout_seconds: float = 20.0) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        session: ZerodhaSession,
+        timeout_seconds: float = 20.0,
+    ) -> None:
         self.api_key = api_key
         self.session = session
         self.timeout_seconds = timeout_seconds
@@ -171,17 +177,29 @@ class MicrostructureRecorder:
             self._store.record_many(converted)
             self._events_recorded += len(converted)
             self._last_event_at = now
-            if self._last_status_write is None or now - self._last_status_write >= timedelta(seconds=5):
+            should_write = (
+                self._last_status_write is None
+                or now - self._last_status_write >= timedelta(seconds=5)
+            )
+            if should_write:
                 self._write_status("connected", universe=universe)
 
         def on_close(ws: Any, code: int, reason: str) -> None:
             del ws
             self._connected = False
-            self._write_status("disconnected", universe=universe, message=f"{code}: {reason}")
+            self._write_status(
+                "disconnected",
+                universe=universe,
+                message=f"{code}: {reason}",
+            )
 
         def on_error(ws: Any, code: int, reason: str) -> None:
             del ws
-            self._write_status("error", universe=universe, message=f"{code}: {reason}")
+            self._write_status(
+                "error",
+                universe=universe,
+                message=f"{code}: {reason}",
+            )
 
         ticker.on_connect = on_connect
         ticker.on_ticks = on_ticks
@@ -293,7 +311,13 @@ def _as_float(value: object) -> float:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
-    raise SystemExit(MicrostructureRecorder(Settings()).run())
+    settings = Settings()
+    while True:
+        recorder = MicrostructureRecorder(settings)
+        result = recorder.run()
+        if result not in {2, 3}:
+            raise SystemExit(result)
+        time.sleep(60)
 
 
 if __name__ == "__main__":
