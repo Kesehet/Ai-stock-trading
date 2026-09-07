@@ -67,7 +67,9 @@ class ChronologicalLogisticModel:
 
     def forecast(self, f: MicroFeatures, horizon_events: int) -> HorizonForecast:
         x = feature_vector(f)
-        z = self.intercept + sum(weight * value for weight, value in zip(self.coefficients, x))
+        z = self.intercept + sum(
+            weight * value for weight, value in zip(self.coefficients, x, strict=True)
+        )
         probability_up = _sigmoid(z)
         probability_up = _shrink_for_horizon(probability_up, horizon_events)
         return HorizonForecast(
@@ -111,7 +113,9 @@ def fit_chronological_logistic(
             if label not in (0, 1):
                 raise ValueError("labels must be 0 or 1")
             x = feature_vector(features)
-            z = intercept + sum(weight * value for weight, value in zip(weights, x))
+            z = intercept + sum(
+                weight * value for weight, value in zip(weights, x, strict=True)
+            )
             error = _sigmoid(z) - float(label)
             grad_intercept += error
             for index, value in enumerate(x):
