@@ -10,6 +10,9 @@ from app.microstructure import BookTick, MicroFeatures, MicrostructureConfig, Mi
 from app.microstructure_models import ForecastModel, default_models, fit_chronological_logistic
 
 
+_MIN_LOGISTIC_SAMPLES = 20
+
+
 @dataclass(frozen=True)
 class ReplayConfig:
     starting_nav: float = 500.0
@@ -149,7 +152,11 @@ class MicrostructureReplay:
                 test_start_by_symbol,
                 horizon,
             )
-            if len(training) >= self.config.min_training_samples:
+            required_training = max(
+                self.config.min_training_samples,
+                _MIN_LOGISTIC_SAMPLES,
+            )
+            if len(training) >= required_training:
                 fitted = fit_chronological_logistic(training)
                 models.append(fitted)
                 fitted_models += 1
