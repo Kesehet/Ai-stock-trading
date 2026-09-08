@@ -18,7 +18,6 @@ from app.microstructure_models import (
     fit_chronological_logistic,
 )
 
-
 _MIN_LOGISTIC_SAMPLES = 20
 
 
