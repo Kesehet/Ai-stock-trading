@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 import struct
-import time
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from threading import Event, Lock
