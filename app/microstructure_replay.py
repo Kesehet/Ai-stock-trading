@@ -6,8 +6,17 @@ from dataclasses import dataclass
 from datetime import datetime
 from math import floor
 
-from app.microstructure import BookTick, MicroFeatures, MicrostructureConfig, MicrostructureEngine
-from app.microstructure_models import ForecastModel, default_models, fit_chronological_logistic
+from app.microstructure import (
+    BookTick,
+    MicroFeatures,
+    MicrostructureConfig,
+    MicrostructureEngine,
+)
+from app.microstructure_models import (
+    ForecastModel,
+    default_models,
+    fit_chronological_logistic,
+)
 
 
 _MIN_LOGISTIC_SAMPLES = 20
