@@ -58,6 +58,14 @@ class Settings(BaseSettings):
     intraday_hot_score_min: float = Field(default=0.035, ge=0, le=2)
     intraday_interrupt_cooldown_seconds: int = Field(default=300, ge=60, le=3600)
 
+    # Shadow-only event recorder. The recorder deliberately subscribes only to
+    # liquid symbols that one whole share can fit inside the configured position cap.
+    microstructure_shadow_enabled: bool = True
+    microstructure_subscription_limit: int = Field(default=100, ge=10, le=1000)
+    microstructure_quote_batch_size: int = Field(default=400, ge=50, le=500)
+    microstructure_max_events_per_symbol: int = Field(default=100_000, ge=10_000, le=500_000)
+    microstructure_prune_every: int = Field(default=2_000, ge=100, le=20_000)
+
     data_dir: str = "/var/lib/ai-stock-trading"
     # This must live on the shared trader-data volume so the dashboard container
     # can observe the trader process. /tmp is private to each container.

@@ -64,6 +64,45 @@ services:
       retries: 3
       start_period: 20s
 
+  microstructure:
+    image: ai-stock-trading:local
+    restart: unless-stopped
+    init: true
+    command: ["python", "-m", "app.microstructure_recorder"]
+    environment:
+      STARTING_CASH: ${STARTING_CASH:-500}
+      MAX_POSITION_PCT: ${MAX_POSITION_PCT:-0.50}
+      UNIVERSE_MIN_PRICE: ${UNIVERSE_MIN_PRICE:-20}
+      TRADING_WATCHLIST: ${TRADING_WATCHLIST-}
+      MICROSTRUCTURE_SHADOW_ENABLED: ${MICROSTRUCTURE_SHADOW_ENABLED:-true}
+      MICROSTRUCTURE_SUBSCRIPTION_LIMIT: ${MICROSTRUCTURE_SUBSCRIPTION_LIMIT:-100}
+      MICROSTRUCTURE_QUOTE_BATCH_SIZE: ${MICROSTRUCTURE_QUOTE_BATCH_SIZE:-400}
+      MICROSTRUCTURE_MAX_EVENTS_PER_SYMBOL: ${MICROSTRUCTURE_MAX_EVENTS_PER_SYMBOL:-100000}
+      MICROSTRUCTURE_PRUNE_EVERY: ${MICROSTRUCTURE_PRUNE_EVERY:-2000}
+      DATA_DIR: /var/lib/ai-stock-trading
+      ZERODHA_API_KEY: ${ZERODHA_API_KEY:-}
+    depends_on:
+      trader:
+        condition: service_healthy
+    volumes:
+      - trader-data:/var/lib/ai-stock-trading
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 0.75
+    stop_grace_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
   dashboard:
     image: ai-stock-trading:local
     restart: unless-stopped
