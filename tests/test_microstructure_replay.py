@@ -41,10 +41,12 @@ def test_replay_waits_for_latency_event_and_scores_net_rupees() -> None:
 
 
 def test_replay_keeps_whole_share_500_rupee_position_cap() -> None:
-    # The configured 50% cap is ₹250. Keep the observed ask below that cap so
-    # exactly one whole share is executable after the one-event latency. An ask
-    # above ₹250 must correctly produce zero shares rather than being forced in.
-    series = _rising_series(50, start_price=249.80)
+    # The configured 50% cap is ₹250. The replay reserves the first 40% of this
+    # series for chronological training, so the first live-equivalent entry occurs
+    # only after ~20 rising ticks plus one latency event. Start sufficiently below
+    # the cap that at least one post-training observed ask is genuinely executable;
+    # later asks may cross ₹250 and must then be rejected rather than rounded in.
+    series = _rising_series(50, start_price=248.50)
     replay = MicrostructureReplay(
         ReplayConfig(
             horizons=(5,),
