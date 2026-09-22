@@ -92,9 +92,13 @@ jobs:
           sleep 10
 
           for attempt in $(seq 1 48); do
-            RESPONSE=$(curl --fail --silent --show-error \
+            if ! RESPONSE=$(curl --fail --silent --show-error \
               -H "Authorization: Bearer $HOSTINGER_API_KEY" \
-              "$URL")
+              "$URL"); then
+              echo "Attempt $attempt/48: Hostinger containers API temporarily unavailable; retrying."
+              sleep 10
+              continue
+            fi
 
             NEW_RESPONSE=$(echo "$RESPONSE" | jq --arg previous "$PREVIOUS_IDS" '
               ($previous | split(",") | map(select(length > 0))) as $old |
