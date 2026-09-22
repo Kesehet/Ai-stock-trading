@@ -41,6 +41,22 @@ class Settings(BaseSettings):
     decision_interval_seconds: int = Field(default=900, ge=60, le=86_400)
     quote_poll_seconds: int = Field(default=10, ge=2, le=300)
     max_ai_candidates: int = Field(default=5, ge=1, le=25)
+
+    # Research-only academic discovery. Papers are stored as hypotheses for replication;
+    # only hypotheses explicitly promoted to ACCEPTED can enter trading research context.
+    academic_research_enabled: bool = True
+    academic_research_refresh_hours: int = Field(default=24, ge=6, le=168)
+    academic_research_rows_per_topic: int = Field(default=8, ge=1, le=50)
+    academic_research_lookback_days: int = Field(default=3650, ge=30, le=7300)
+    academic_research_mailto: str = ""
+    academic_research_topics: str = (
+        "Indian equities momentum market regime;"
+        "NSE intraday momentum transaction costs;"
+        "equity order book imbalance market microstructure;"
+        "volatility adjusted position sizing momentum;"
+        "breakout pullback entry momentum"
+    )
+
     universe_history_days: int = Field(default=90, ge=30, le=365)
     universe_min_price: float = Field(default=20.0, ge=0)
     universe_min_history_bars: int = Field(default=20, ge=5, le=252)
@@ -81,6 +97,16 @@ class Settings(BaseSettings):
                 symbol.strip().upper()
                 for symbol in self.trading_watchlist.split(",")
                 if symbol.strip()
+            )
+        )
+
+    @property
+    def academic_topics(self) -> tuple[str, ...]:
+        return tuple(
+            dict.fromkeys(
+                topic.strip()
+                for topic in self.academic_research_topics.split(";")
+                if topic.strip()
             )
         )
 
