@@ -5,6 +5,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Protocol
 
+from app.academic_research import (
+    AcademicResearchService,
+    AcademicResearchStore,
+    CrossrefSSRNSource,
+)
 from app.ai import OllamaClient
 from app.brokers import ExecutionResult
 from app.config import AppMode, Settings
@@ -59,6 +64,18 @@ class AutonomousTrader:
             self.data_dir / "zerodha-credentials.json"
         )
         self.evidence = EvidenceStore(self.data_dir / "evidence.sqlite3")
+        self.academic_research = AcademicResearchStore(
+            self.data_dir / "academic-research.sqlite3"
+        )
+        self.academic_research_service = AcademicResearchService(
+            self.academic_research,
+            CrossrefSSRNSource(
+                rows_per_topic=settings.academic_research_rows_per_topic,
+                lookback_days=settings.academic_research_lookback_days,
+                mailto=settings.academic_research_mailto,
+            ),
+            topics=settings.academic_topics,
+        )
         self.news = CompanyNewsIngestor(self.evidence)
         self.market_data = HistoricalDataStore()
         self.theses = ThesisStore(self.data_dir / "theses.sqlite3")
@@ -83,6 +100,41 @@ class AutonomousTrader:
         self._last_nav_write: datetime | None = None
         self._last_mode: AppMode | None = None
         self._last_connection_state = ""
+
+    def _refresh_academic_research(self, now: datetime) -> None:
+        if not self.settings.academic_research_enabled:
+            return
+        local = now.astimezone(IST)
+        if local.hour < 16:
+            return
+        if not self.academic_research_service.due(
+            now,
+            refresh_hours=float(self.settings.academic_research_refresh_hours),
+        ):
+            return
+        try:
+            result = self.academic_research_service.refresh(now)
+        except Exception as exc:
+            self.operations.append_event(
+                "research",
+                "ACADEMIC_RESEARCH_REFRESH_FAILED",
+                {"error": type(exc).__name__},
+                now,
+            )
+            logger.exception("academic research refresh failed")
+            return
+        self.operations.append_event(
+            "research",
+            "ACADEMIC_RESEARCH_REFRESHED",
+            {
+                "topics": result.topics,
+                "fetched": result.fetched,
+                "inserted": result.inserted,
+                "source": "SSRN via Crossref",
+                "trading_influence": "accepted_hypotheses_only",
+            },
+            now,
+        )
 
     def _credentials(self) -> ZerodhaCredentials | None:
         api_key = self.settings.zerodha_api_key.strip()
@@ -261,6 +313,7 @@ class AutonomousTrader:
             market_data=self.market_data,
             evidence=self.evidence,
             portfolio=broker,
+            academic=self.academic_research,
             live_quotes=quotes,
         )
         return ResearchTeam(llm, context)
@@ -645,6 +698,7 @@ class AutonomousTrader:
             logger.warning("runtime mode is now %s", mode.value)
             self._last_mode = mode
 
+        self._refresh_academic_research(current)
         api = self._api()
         if api is None:
             return
