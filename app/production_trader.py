@@ -478,6 +478,7 @@ class ProductionAutonomousTrader(AutonomousTrader):
             logger.warning("runtime mode is now %s", mode.value)
             self._last_mode = mode
 
+        self._refresh_academic_research(current)
         api = self._api()
         if api is None:
             return
