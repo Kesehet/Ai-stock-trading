@@ -9,7 +9,7 @@ from hashlib import sha256
 from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any, cast, Protocol
+from typing import Any, Protocol, cast
 from uuid import uuid4
 
 import httpx
