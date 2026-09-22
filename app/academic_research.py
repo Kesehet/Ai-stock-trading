@@ -9,7 +9,7 @@ from hashlib import sha256
 from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, cast, Protocol
 from uuid import uuid4
 
 import httpx
@@ -57,7 +57,7 @@ class AcademicPaper(BaseModel):
     @staticmethod
     def make_fingerprint(doi: str | None, title: str, source_url: str) -> str:
         stable = (doi or source_url).strip().lower()
-        return sha256(f"{stable}|{title.strip().lower()}".encode("utf-8")).hexdigest()
+        return sha256(f"{stable}|{title.strip().lower()}".encode()).hexdigest()
 
 
 class AcademicHypothesis(BaseModel):
